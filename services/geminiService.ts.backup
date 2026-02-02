@@ -1,0 +1,551 @@
+
+import { GoogleGenAI, Type } from "@google/genai";
+import { ReviewResponse, CategorizedComment } from "../types";
+import {
+  getAvailableModelsForTask,
+  ModelConfig
+} from "./modelRotation";
+import { fetchRepositoryContext, formatContextForPrompt, GitHubMCPContext } from "./githubMCPContext";
+import {
+  fetchAutoDiscoveredContext,
+  formatPRDContextForPrompt,
+  JiraConfluenceContext
+} from "./jiraConfluenceMCP";
+
+} from "./jiraConfluenceMCP";
+
+// Enhanced prompts for comprehensive analysis
+const ENHANCED_ANALYSIS_PROMPT = `You are an expert senior principal engineer conducting a thorough security-focused code review.
+
+CONTEXT FROM REPOSITORY:
+CONTEXT_FROM_REPO
+
+CONTEXT FROM PROJECT DOCUMENTATION:
+CONTEXT_FROM_PRD
+
+ANALYSIS MISSION:
+Examine this PR diff systematically to identify ONLY genuine issues that could impact production systems. Focus on critical problems that could cause real-world failures.
+
+CRITICAL ISSUE CATEGORIES (report only these):
+🔴 CRITICAL BUGS:
+- Runtime exceptions, crashes, uncaught errors
+- Null/undefined reference errors
+- Race conditions, concurrency bugs  
+- Memory leaks, resource exhaustion
+- Security vulnerabilities (XSS, injection, auth bypass)
+- Data corruption, state consistency issues
+- Performance bottlenecks, O(N²) algorithms
+- Resource leaks (file handles, connections, memory)
+
+🟡 MINOR ISSUES (avoid unless severe):
+- Code style, formatting, naming conventions
+- Minor performance optimizations
+- Non-breaking refactoring suggestions
+- Documentation improvements
+
+ANALYSIS REQUIREMENTS:
+✅ MUST INCLUDE:
+- Exact file path and line numbers
+- Specific code snippet showing the problem
+- Clear explanation of potential impact
+- Concrete fix proposal with corrected code
+
+❌ EXCLUDE:
+- Style suggestions, "would be clearer if..."
+- Opinionated architectural changes
+- "Consider using..." without concrete reason
+- Minor optimizations that don't affect correctness
+
+REPORTING FORMAT:
+For each issue, provide structured feedback that helps developers:
+1. **Problem**: What exactly is wrong and why it matters
+2. **Impact**: How this could fail in production
+3. **Solution**: Specific code fix, not suggestions
+4. **Verification**: How to test the fix
+
+QUALITY GUIDELINE:
+Find 2-5 critical issues maximum. Zero issues is acceptable if code is solid.
+
+Remember: Your analysis directly impacts code quality and production stability. Be precise, helpful, and focused on real problems.`;
+
+// Enhanced categorization prompt
+const ENHANCED_CATEGORIZATION_PROMPT = `You are an expert code reviewer analyzing PR comments for actionability.
+
+CATEGORIZATION MISSION:
+Classify each comment based on impact urgency and required action.
+
+CATEGORIES (choose exactly ONE):
+
+🚨 CRITICAL_BUG:
+- Runtime errors, crashes, exceptions
+- Security vulnerabilities (authentication, injection, data exposure)
+- Data loss, corruption, race conditions
+- Performance issues that affect users
+- Memory/resource leaks
+
+📝 NITPICK:
+- Code style, formatting, naming
+- Minor performance micro-optimizations
+- Documentation improvements
+- "Would be clearer if..." suggestions
+- Architectural preferences without concrete issues
+
+💡 OTHER:
+- General feedback, questions
+- Enhancement suggestions
+- Non-critical observations
+
+DECISION FRAMEWORK:
+1. **Impact**: Will this cause production issues if ignored?
+2. **Urgency**: Does this need immediate attention?
+3. **Actionability**: Can developer implement this easily?
+
+RESPONSE FORMAT:
+Return JSON array with:
+- comment_index: number (from input)
+- category: "CRITICAL_BUG" | "NITPICK" | "OTHER"
+- reasoning: Brief justification (1-2 sentences)
+
+Example:
+{"comment_index": 0, "category": "CRITICAL_BUG", "reasoning": "Potential null reference could cause runtime crash"}
+
+Prioritize developer productivity - focus on what needs action now vs what can wait.`;
+
+interface RequestOptions {
+  model: string;
+  contents: string;
+  systemInstruction: string;
+  responseMimeType?: string;
+  responseSchema?: object;
+}
+
+interface ProviderHandler {
+  name: string;
+  makeRequest: (options: RequestOptions) => Promise<{ text: string }>;
+}
+
+async function callGoogleGenAI(options: RequestOptions): Promise<{ text: string }> {
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GOOGLE_API_KEY || 'hoainho',
+    httpOptions: { baseUrl: 'http://localhost:8317' }
+  });
+
+  const response = await ai.models.generateContent({
+    model: options.model,
+    contents: options.contents,
+    config: {
+      systemInstruction: options.systemInstruction,
+      responseMimeType: options.responseMimeType,
+      responseSchema: options.responseSchema,
+    },
+  });
+
+  return { text: response.text || '' };
+}
+
+async function callOpenAICompatible(options: RequestOptions): Promise<{ text: string }> {
+  const baseUrl = process.env.OPENCODE_API_URL || 'http://localhost:8317';
+  const apiKey = process.env.OPENCODE_API_KEY || 'hoainho';
+
+  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: options.model,
+      messages: [
+        { role: 'system', content: options.systemInstruction },
+        { role: 'user', content: options.contents },
+      ],
+      temperature: 0.2,
+      max_tokens: 16384,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`OpenAI-compatible API error: ${response.status} - ${error}`);
+  }
+
+  const data = await response.json();
+  return { text: data.choices?.[0]?.message?.content || '' };
+}
+
+function getProviderHandler(modelName: string): ProviderHandler {
+  const googleModels = ['gemini', 'gemini-1', 'gemini-2', 'gemini-3'];
+  const isGoogleModel = googleModels.some(m => modelName.startsWith(m));
+
+  if (isGoogleModel) {
+    return {
+      name: 'GoogleGenAI',
+      makeRequest: callGoogleGenAI,
+    };
+  }
+
+  return {
+    name: 'OpenAI-Compatible',
+    makeRequest: callOpenAICompatible,
+  };
+}
+
+interface RetryOptions {
+  maxRetries?: number;
+  task?: 'analyze' | 'categorize' | 'general';
+  onModelRotate?: (currentModel: string, nextModel: string, attempt: number, quotaType: string) => void;
+  onRetry?: (model: string, error: string, attempt: number, maxRetries: number) => void;
+  onFinalError?: (errors: string[]) => void;
+}
+
+const MODEL_QUOTA_STATUS: Map<string, number> = new Map();
+const COOLDOWN_MS = 60000;
+
+function isQuotaExhausted(modelName: string): boolean {
+  const lastError = MODEL_QUOTA_STATUS.get(modelName);
+  if (!lastError) return false;
+  return Date.now() - lastError < COOLDOWN_MS;
+}
+
+function markQuotaExhausted(modelName: string): void {
+  MODEL_QUOTA_STATUS.set(modelName, Date.now());
+}
+
+function clearAllQuota(): void {
+  MODEL_QUOTA_STATUS.clear();
+}
+
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    const patterns = [
+      'capacity', 'rate limit', 'quota', 'temporarily unavailable',
+      'overloaded', '503', '429', 'timeout', 'network',
+      'econnreset', 'etimedout', 'socket hang up', 'empty response',
+      'too many requests', 'resource exhausted', 'insufficient quota',
+      'unknown provider', 'provider not found', 'invalid provider',
+      'model not found', 'unsupported model', 'not found model'
+    ];
+    return patterns.some(p => message.includes(p));
+  }
+  return false;
+}
+
+async function executeWithRetry<T>(
+  taskFn: (model: ModelConfig) => Promise<T>,
+  options: RetryOptions = {}
+): Promise<T> {
+  const task = options.task || 'general';
+  const maxRetries = options.maxRetries || 5;
+  const errors: string[] = [];
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    let availableModels = getAvailableModelsForTask(task)
+      .filter(m => !isQuotaExhausted(m.name));
+
+    if (availableModels.length === 0) {
+      clearAllQuota();
+      availableModels = getAvailableModelsForTask(task);
+    }
+
+    const triedModels = new Set<string>();
+
+    for (let modelIndex = 0; modelIndex < availableModels.length; modelIndex++) {
+      const model = availableModels[modelIndex];
+
+      if (triedModels.has(model.name)) continue;
+      triedModels.add(model.name);
+
+      try {
+        return await taskFn(model);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        errors.push(`${model.displayName}: ${lastError.message}`);
+
+        if (options.onRetry) {
+          options.onRetry(model.displayName, lastError.message, attempt + 1, maxRetries);
+        }
+
+        if (!isRetryableError(lastError)) {
+          if (options.onFinalError) options.onFinalError(errors);
+          throw lastError;
+        }
+
+        markQuotaExhausted(model.name);
+
+        const nextModel = availableModels[modelIndex + 1];
+        if (nextModel && options.onModelRotate) {
+          options.onModelRotate(
+            model.displayName,
+            nextModel.displayName,
+            attempt + 1,
+            model.quotaType || 'unknown'
+          );
+        }
+      }
+    }
+  }
+
+  if (options.onFinalError) options.onFinalError(errors);
+  throw lastError || new Error(`All models failed after ${maxRetries} retries`);
+}
+
+export const analyzeDiff = async (
+  diff: string,
+  githubContext?: GitHubMCPContext,
+  jiraContext?: JiraConfluenceContext
+): Promise<ReviewResponse> => {
+  const result = await executeWithRetry(
+    async (model) => {
+      console.log(`[Model] Using ${model.displayName} (${model.sdkModelName}) via ${getProviderHandler(model.sdkModelName).name}`);
+
+      const handler = getProviderHandler(model.sdkModelName);
+
+      const githubContextPrompt = githubContext
+        ? await formatContextForPrompt(await fetchRepositoryContext(githubContext))
+        : '\nNo repository context available.\n';
+
+      const prdContext = jiraContext
+        ? await fetchAutoDiscoveredContext(jiraContext, diff, diff)
+        : null;
+      
+      const prdContextPrompt = prdContext
+        ? await formatPRDContextForPrompt(prdContext)
+        : '\nNo PRD context available.\n';
+
+      const DIFF_ANALYSIS_TEMPLATE = `You are an expert senior principal engineer conducting a thorough security-focused code review.
+
+CONTEXT FROM REPOSITORY:
+${githubContextPrompt}
+
+CONTEXT FROM PROJECT DOCUMENTATION:
+${prdContextPrompt}
+
+ANALYSIS MISSION:
+Examine this PR diff systematically to identify ONLY genuine issues that could impact production systems. Focus on critical problems that could cause real-world failures.
+
+CRITICAL ISSUE CATEGORIES (report only these):
+🔴 CRITICAL BUGS:
+- Runtime exceptions, crashes, uncaught errors
+- Null/undefined reference errors
+- Race conditions, concurrency bugs  
+- Memory leaks, resource exhaustion
+- Security vulnerabilities (XSS, injection, auth bypass)
+- Data corruption, state consistency issues
+- Performance bottlenecks, O(N²) algorithms
+- Resource leaks (file handles, connections, memory)
+
+🟡 MINOR ISSUES (avoid unless severe):
+- Code style, formatting, naming conventions
+- Minor performance optimizations
+- Non-breaking refactoring suggestions
+- Documentation improvements
+
+ANALYSIS REQUIREMENTS:
+✅ MUST INCLUDE:
+- Exact file path and line numbers
+- Specific code snippet showing the problem
+- Clear explanation of potential impact
+- Concrete fix proposal with corrected code
+
+❌ EXCLUDE:
+- Style suggestions, "would be clearer if..."
+- Opinionated architectural changes
+- "Consider using..." without concrete reason
+- Minor optimizations that don't affect correctness
+
+REPORTING FORMAT:
+For each issue, provide structured feedback that helps developers:
+1. **Problem**: What exactly is wrong and why it matters
+2. **Impact**: How this could fail in production
+3. **Solution**: Specific code fix, not suggestions
+4. **Verification**: How to test the fix
+
+QUALITY OVER QUANTITY:
+Find 2-5 critical issues maximum. Zero issues is acceptable if code is solid.
+
+Remember: Your analysis directly impacts code quality and production stability. Be precise, helpful, and focused on real problems.`;
+
+      const response = await handler.makeRequest({
+        model: model.sdkModelName,
+        contents: `=== PR DIFF ===\n\n${diff}\n\n${ENHANCED_ANALYSIS_PROMPT}`,
+        systemInstruction: `You are an expert senior principal engineer conducting a comprehensive security-focused code review.
+
+ANALYSIS APPROACH:
+1. **Deep Context Understanding**: Use provided GitHub repository context and Jira/Confluence documentation to understand requirements
+2. **Systematic Line-by-Line Review**: Examine each changed file methodically
+3. **Risk Assessment**: Evaluate each potential issue for production impact
+4. **Constructive Feedback**: Provide clear, actionable solutions
+
+REVIEW CRITERIA:
+🎯 FOCUS ON CRITICAL ISSUES:
+- Runtime failures (exceptions, crashes, panics)
+- Security vulnerabilities (injection, auth bypass, data exposure)  
+- Concurrency problems (race conditions, deadlocks)
+- Resource management (memory leaks, file handle leaks)
+- State management bugs (inconsistent state, lost updates)
+- Performance problems (infinite loops, O(n²) complexity)
+- Data integrity issues (corruption, loss, invalid state)
+
+🚫 EXCLUDE MINOR ISSUES:
+- Code style, formatting conventions
+- Variable naming suggestions
+- "Would be more readable" changes
+- Architectural preferences without concrete problems
+- Documentation improvements
+- Minor micro-optimizations
+
+OUTPUT REQUIREMENTS:
+For each critical issue found:
+1. **Issue Identification**: Clear problem statement with location
+2. **Root Cause Analysis**: Why this occurs and potential impact  
+3. **Code Evidence**: Show exact problematic code
+4. **Solution**: Concrete fix with implementation
+5. **Risk Assessment**: Production impact severity
+
+Remember: Your feedback directly influences code quality and system reliability. Be precise, thorough, and focus on preventing real production failures.`;
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            issues: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  bug_description: { type: Type.STRING },
+                  severity: { type: Type.STRING, enum: ["HIGH", "MEDIUM", "LOW"] },
+                  bug_type: { type: Type.STRING, enum: ["RACE_CONDITION", "STATE_MANAGEMENT", "MEMORY_LEAK", "SECURITY", "CRASH", "CORRUPTION", "PERFORMANCE", "RESOURCE_LEAK"] },
+                  file_name: { type: Type.STRING },
+                  line_numbers: { type: Type.STRING },
+                  snippet: { type: Type.STRING },
+                  suggested_fix: { type: Type.STRING },
+                  suggested_code: { type: Type.STRING },
+                },
+                required: ["bug_description", "severity", "bug_type", "file_name", "line_numbers", "snippet", "suggested_fix", "suggested_code"],
+              },
+            },
+          },
+          required: ["issues"],
+        },
+      });
+
+      try {
+        return JSON.parse(response.text || '{"issues": []}') as ReviewResponse;
+      } catch (error) {
+        throw new Error(`Invalid response format from ${handler.name}`);
+      }
+    },
+    {
+      task: 'analyze',
+      maxRetries: 10,
+      onModelRotate: (current, next, attempt) => {
+        console.warn(`[Retry ${attempt}] ${current} exhausted, trying ${next}`);
+      },
+      onRetry: (model, error) => {
+        console.warn(`[Error] ${model}: ${error}`);
+      },
+      onFinalError: (errors) => {
+        console.error('[Final] All models failed:');
+        errors.forEach((e, i) => console.error(`  ${i + 1}. ${e}`));
+      }
+    }
+  );
+
+  return result;
+};
+
+export const categorizeComments = async (prNumber: string, botName: string, comments: string): Promise<CategorizedComment[]> => {
+  const result = await executeWithRetry(
+    async (model) => {
+      console.log(`[Model] Using ${model.displayName} (${model.sdkModelName}) via ${getProviderHandler(model.sdkModelName).name}`);
+
+      const handler = getProviderHandler(model.sdkModelName);
+
+      const systemInstruction = `You are an expert code reviewer analyzing PR comments for actionability.
+
+CATEGORIZATION MISSION:
+Classify each comment based on impact urgency and required action.
+
+CATEGORIES (choose exactly ONE):
+
+🚨 CRITICAL_BUG:
+- Runtime errors, crashes, exceptions
+- Security vulnerabilities (auth, injection, data exposure)
+- Data loss, corruption, race conditions
+- Performance issues that affect users
+- Memory/resource leaks
+- Anything that could break production
+
+📝 NITPICK:
+- Code style, formatting, naming
+- Minor performance micro-optimizations
+- Documentation improvements
+- "Would be clearer if..." suggestions
+- Architectural preferences without concrete issues
+
+💡 OTHER:
+- General feedback, questions
+- Enhancement suggestions
+- Non-critical observations
+
+DECISION FRAMEWORK:
+1. **Impact**: Will this cause production issues if ignored?
+2. **Urgency**: Does this need immediate attention?
+3. **Actionability**: Can the developer implement this easily?
+
+RESPONSE FORMAT:
+Return JSON array with:
+- comment_index: number (from input)
+- category: "CRITICAL_BUG" | "NITPICK" | "OTHER"
+- reasoning: Brief justification (1-2 sentences)
+
+Example:
+{"comment_index": 0, "category": "CRITICAL_BUG", "reasoning": "Potential null reference could cause runtime crash"}
+
+Prioritize developer productivity - focus on what needs action now vs what can wait.`;
+
+      const response = await handler.makeRequest({
+        model: model.sdkModelName,
+        contents: `PR #${prNumber} by ${botName}:\n\n${comments}`,
+systemInstruction: ENHANCED_CATEGORIZATION_PROMPT,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              comment_index: { type: Type.STRING },
+              category: { type: Type.STRING, enum: ["CRITICAL_BUG", "NITPICK", "OTHER"] },
+              reasoning: { type: Type.STRING },
+            },
+            required: ["comment_index", "category", "reasoning"],
+          },
+        },
+      });
+
+      try {
+        return JSON.parse(response.text || '[]') as CategorizedComment[];
+      } catch (error) {
+        throw new Error(`Invalid response format from ${handler.name}`);
+      }
+    },
+    {
+      task: 'categorize',
+      maxRetries: 10,
+      onModelRotate: (current, next, attempt) => {
+        console.warn(`[Retry ${attempt}] ${current} exhausted, trying ${next}`);
+      },
+      onRetry: (model, error) => {
+        console.warn(`[Error] ${model}: ${error}`);
+      },
+      onFinalError: (errors) => {
+        console.error('[Final] All models failed:');
+        errors.forEach((e, i) => console.error(`  ${i + 1}. ${e}`));
+      }
+    }
+  );
+
+  return result;
+};

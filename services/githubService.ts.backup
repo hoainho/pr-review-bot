@@ -1,0 +1,138 @@
+// GitHub PR service with corrected syntax
+export interface GitHubPrInfo {
+  owner: string;
+  repo: string;
+  pullNumber: string;
+}
+
+export const parseGitHubUrl = (url: string): GitHubPrInfo | null => {
+  const match = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+  if (!match) return null;
+  return {
+    owner: match[1],
+    repo: match[2],
+    pullNumber: match[3],
+  };
+};
+
+export const fetchPrDiff = async (url: string, token: string): Promise<string> => {
+  const info = parseGitHubUrl(url);
+  if (!info) throw new Error("Invalid GitHub PR URL");
+
+  const response = await fetch(
+    `https://api.github.com/repos/${info.owner}/${info.repo}/pulls/${info.pullNumber}`,
+    {
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: "application/vnd.github.v3.diff",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch PR diff: ${response.statusText}`);
+  }
+
+  return response.text();
+};
+
+export const fetchPRInfoFromUrl = async (url: string, token: string) => {
+  const info = parseGitHubUrl(url);
+  if (!info) throw new Error("Invalid GitHub PR URL");
+
+  const response = await fetch(
+    `https://api.github.com/repos/${info.owner}/${info.repo}/pulls/${info.pullNumber}`,
+    {
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: "application/vnd.github.v3+json",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch PR info: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return {
+    ...info,
+    pullNumber: parseInt(info.pullNumber),
+  };
+};
+
+export const submitPrReview = async (
+  url: string,
+  token: string,
+  issues: any[],
+  botName: string
+): Promise<void> => {
+  const info = parseGitHubUrl(url);
+  if (!info) throw new Error("Invalid GitHub PR URL");
+
+  // Filter only approved issues
+  const approvedIssues = issues.filter(issue => 
+    issue.approval_status && issue.approval_status === 'APPROVED'
+  );
+
+  if (approvedIssues.length === 0) {
+    console.log('[GitHub] No approved issues to submit');
+    return;
+  }
+
+  // Create review comments for each approved issue
+  const comments = approvedIssues.map(issue => ({
+    path: issue.file_name,
+    line: parseInt(issue.line_numbers?.toString() || '1'),
+    body: `## ${issue.bug_type?.replace('_', ' ').toUpperCase()}
+
+### Issue
+${issue.bug_description}
+
+### Impact
+${issue.suggested_fix}
+
+### Suggested Fix
+\`\`\`typescript
+${issue.suggested_code || '// No specific code provided'}
+\`\`\`
+`
+  }));
+
+  const reviewBody = `🤖 **PR Review by ${botName}**
+
+${approvedIssues.length} issue(s) found and reviewed:
+
+${comments.map(c => `- **${c.path}:${c.line}** - ${c.body.split('\n')[1]?.trim()}`).join('\n')}
+
+---
+*Generated with Gear PR Review Pro*
+`;
+
+  const response = await fetch(
+    `https://api.github.com/repos/${info.owner}/${info.repo}/pulls/${info.pullNumber}/reviews`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        body: reviewBody,
+        event: 'COMMENT',
+        comments: comments.map(comment => ({
+          path: comment.path,
+          line: comment.line,
+          body: comment.body,
+        })),
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to submit review: ${response.statusText}`);
+  }
+
+  console.log(`[GitHub] Successfully submitted review with ${approvedIssues.length} comments`);
+};
