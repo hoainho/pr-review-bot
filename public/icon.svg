@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4F46E5"/>
+      <stop offset="100%" style="stop-color:#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="gearGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#E0E7FF"/>
+      <stop offset="100%" style="stop-color:#C7D2FE"/>
+    </linearGradient>
+    <linearGradient id="checkGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10B981"/>
+      <stop offset="100%" style="stop-color:#059669"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#4F46E5" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  
+  <!-- Background rounded square -->
+  <rect x="32" y="32" width="448" height="448" rx="96" fill="url(#bgGradient)" filter="url(#shadow)"/>
+  
+  <!-- Gear outer ring -->
+  <g transform="translate(256, 256)">
+    <!-- Gear teeth -->
+    <path d="M0,-140 L20,-138 L25,-120 L35,-122 L50,-140 L65,-130 L60,-110 L70,-105 L90,-118 L100,-100 L85,-85 L92,-75 L115,-80 L118,-58 L100,-50 L102,-38 L125,-30 L122,-8 L100,-5 L100,5 L122,8 L125,30 L102,38 L100,50 L118,58 L115,80 L92,75 L85,85 L100,100 L90,118 L70,105 L60,110 L65,130 L50,140 L35,122 L25,120 L20,138 L0,140 L-20,138 L-25,120 L-35,122 L-50,140 L-65,130 L-60,110 L-70,105 L-90,118 L-100,100 L-85,85 L-92,75 L-115,80 L-118,58 L-100,50 L-102,38 L-125,30 L-122,8 L-100,5 L-100,-5 L-122,-8 L-125,-30 L-102,-38 L-100,-50 L-118,-58 L-115,-80 L-92,-75 L-85,-85 L-100,-100 L-90,-118 L-70,-105 L-60,-110 L-65,-130 L-50,-140 L-35,-122 L-25,-120 L-20,-138 Z" 
+          fill="url(#gearGradient)" opacity="0.95"/>
+    
+    <!-- Inner circle cutout -->
+    <circle cx="0" cy="0" r="55" fill="url(#bgGradient)"/>
+    
+    <!-- Code bracket symbol inside gear -->
+    <g fill="#E0E7FF" font-family="Monaco, 'Courier New', monospace" font-weight="bold">
+      <text x="-25" y="12" font-size="48">&lt;</text>
+      <text x="5" y="12" font-size="48">/&gt;</text>
+    </g>
+  </g>
+  
+  <!-- Checkmark badge -->
+  <g transform="translate(360, 360)">
+    <circle cx="0" cy="0" r="56" fill="#1E293B"/>
+    <circle cx="0" cy="0" r="48" fill="url(#checkGradient)"/>
+    <path d="M-20,0 L-8,12 L22,-16" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>

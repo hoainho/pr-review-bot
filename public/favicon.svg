@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4F46E5"/>
+      <stop offset="100%" style="stop-color:#7C3AED"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="32" height="32" rx="6" fill="url(#bg)"/>
+  
+  <!-- Simplified gear -->
+  <g transform="translate(16, 16)">
+    <circle cx="0" cy="0" r="9" fill="none" stroke="#E0E7FF" stroke-width="3"/>
+    <circle cx="0" cy="0" r="3" fill="#E0E7FF"/>
+    <!-- Gear teeth simplified -->
+    <rect x="-1.5" y="-12" width="3" height="4" fill="#E0E7FF"/>
+    <rect x="-1.5" y="8" width="3" height="4" fill="#E0E7FF"/>
+    <rect x="-12" y="-1.5" width="4" height="3" fill="#E0E7FF"/>
+    <rect x="8" y="-1.5" width="4" height="3" fill="#E0E7FF"/>
+  </g>
+  
+  <!-- Small checkmark -->
+  <circle cx="24" cy="24" r="6" fill="#10B981"/>
+  <path d="M21,24 L23,26 L27,22" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

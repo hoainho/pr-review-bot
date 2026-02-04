@@ -3,6 +3,7 @@ import { analyzeDiff } from './services/geminiService';
 import { fetchPrDiff, submitPrReview, parseGitHubUrl, fetchPRInfoFromUrl, checkMergeConflicts } from './services/githubService';
 import { PRIssue, Severity, ApprovalStatus, BugType, AnalysisProgress, ExportOptions, ReviewPreset, ReviewAnalytics, ReviewLogEntry } from './types';
 import { ReviewTerminal } from './components/ReviewTerminal';
+import { RequirementTooltip } from './components/RequirementTooltip';
 import type { GitHubMCPContext } from './services/githubMCPContext';
 import type { JiraConfluenceContext } from './services/jiraConfluenceMCP';
 import { initTheme, toggleTheme, getThemeConfig } from './services/darkMode';
@@ -248,7 +249,9 @@ const App: React.FC = () => {
       }
 
       addLog('info', `Fetching PR diff from ${prInfo.owner}/${prInfo.repo}#${prInfo.pullNumber}`);
-      const diff = await fetchPrDiff(githubUrl, githubToken);
+      const diff = await fetchPrDiff(githubUrl, githubToken, (progressMsg) => {
+        addLog('info', progressMsg);
+      });
       const fileCount = (diff.match(/^diff --git/gm) || []).length;
       const lineCount = diff.split('\n').length;
       addLog('success', `Fetched diff: ${fileCount} files, ${lineCount} lines`);
@@ -366,9 +369,10 @@ const App: React.FC = () => {
         allIssues.unshift(conflictIssue); // Add at the beginning to highlight conflicts
       }
       
-      // Initialize all issues as pending
-      const issuesWithStatus = allIssues.map(issue => ({
+      // Initialize all issues with unique ID and pending status
+      const issuesWithStatus = allIssues.map((issue, idx) => ({
         ...issue,
+        id: `issue-${Date.now()}-${idx}`,
         approval_status: ApprovalStatus.PENDING,
         rejection_reason: ''
       }));
@@ -411,28 +415,31 @@ const App: React.FC = () => {
     }
   };
 
-  const handleApprove = (index: number) => {
+  const handleApprove = (issueId: string) => {
     if (!results) return;
-    const updated = [...results];
-    updated[index].approval_status = ApprovalStatus.APPROVED;
-    updated[index].rejection_reason = '';
-    setResults(updated);
+    setResults(results.map(issue => 
+      issue.id === issueId 
+        ? { ...issue, approval_status: ApprovalStatus.APPROVED, rejection_reason: '' }
+        : issue
+    ));
   };
 
-  const handleReject = (index: number, reason?: string) => {
+  const handleReject = (issueId: string, reason?: string) => {
     if (!results) return;
-    const updated = [...results];
-    updated[index].approval_status = ApprovalStatus.REJECTED;
-    updated[index].rejection_reason = reason || 'Rejected by reviewer';
-    setResults(updated);
+    setResults(results.map(issue => 
+      issue.id === issueId 
+        ? { ...issue, approval_status: ApprovalStatus.REJECTED, rejection_reason: reason || 'Rejected by reviewer' }
+        : issue
+    ));
   };
 
-  const handleReset = (index: number) => {
+  const handleReset = (issueId: string) => {
     if (!results) return;
-    const updated = [...results];
-    updated[index].approval_status = ApprovalStatus.PENDING;
-    updated[index].rejection_reason = '';
-    setResults(updated);
+    setResults(results.map(issue => 
+      issue.id === issueId 
+        ? { ...issue, approval_status: ApprovalStatus.PENDING, rejection_reason: '' }
+        : issue
+    ));
   };
 
   const getSeverityColor = (severity: Severity) => {
@@ -1176,9 +1183,17 @@ const App: React.FC = () => {
                           {issue.bug_type.replace('_', ' ')}
                         </span>
                         {issue.prd_related && (
-                          <span className="px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-purple-600 text-white border border-purple-500">
-                            📋 PRD/TDD
-                          </span>
+                          issue.prd_requirement ? (
+                            <RequirementTooltip requirement={issue.prd_requirement}>
+                              <span className="px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-purple-600 text-white border border-purple-500 cursor-help hover:bg-purple-700 transition-colors">
+                                PRD/TDD
+                              </span>
+                            </RequirementTooltip>
+                          ) : (
+                            <span className="px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-purple-600 text-white border border-purple-500">
+                              PRD/TDD
+                            </span>
+                          )
                         )}
                       </div>
                       <div className="flex items-center space-x-3">
@@ -1251,7 +1266,7 @@ const App: React.FC = () => {
 
                       <div className="flex items-center justify-center space-x-4 pt-4 border-t border-slate-100 dark:border-slate-700">
                         <button
-                          onClick={() => handleApprove(idx)}
+                          onClick={() => issue.id && handleApprove(issue.id)}
                           disabled={issue.approval_status === ApprovalStatus.APPROVED}
                           className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${
                             issue.approval_status === ApprovalStatus.APPROVED
@@ -1263,7 +1278,7 @@ const App: React.FC = () => {
                           <span>Approve</span>
                         </button>
                         <button
-                          onClick={() => handleReject(idx)}
+                          onClick={() => issue.id && handleReject(issue.id)}
                           disabled={issue.approval_status === ApprovalStatus.REJECTED}
                           className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${
                             issue.approval_status === ApprovalStatus.REJECTED
@@ -1276,7 +1291,7 @@ const App: React.FC = () => {
                         </button>
                         {(issue.approval_status === ApprovalStatus.APPROVED || issue.approval_status === ApprovalStatus.REJECTED) && (
                           <button
-                            onClick={() => handleReset(idx)}
+                            onClick={() => issue.id && handleReset(issue.id)}
                             className="flex items-center space-x-2 px-4 py-3 rounded-xl font-bold text-sm bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 transition-all"
                           >
                             <Eye className="w-4 h-4" />

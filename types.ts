@@ -28,7 +28,17 @@ export enum ApprovalStatus {
   REJECTED = 'rejected'
 }
 
+export interface PRDRequirement {
+  id: string;
+  title: string;
+  description: string;
+  source: 'jira' | 'confluence' | 'manual';
+  sourceUrl?: string;
+  gap_description: string;
+}
+
 export interface PRIssue {
+  id?: string;
   bug_description: string;
   severity: Severity;
   bug_type: BugType;
@@ -40,6 +50,7 @@ export interface PRIssue {
   approval_status?: ApprovalStatus;
   rejection_reason?: string;
   prd_related?: boolean;
+  prd_requirement?: PRDRequirement;
 }
 
 export interface ReviewResponse {
