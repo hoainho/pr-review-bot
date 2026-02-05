@@ -321,7 +321,7 @@ async function callGoogleGenAI(options: RequestOptions): Promise<{ text: string 
 
   const ai = new GoogleGenAI({
     apiKey: import.meta.env.VITE_GOOGLE_API_KEY || 'hoainho',
-    httpOptions: { baseUrl: 'http://localhost:8317' }
+    httpOptions: { baseUrl: import.meta.env.VITE_OPENCODE_API_URL || 'http://34.60.22.68:8080' }
   });
 
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -357,7 +357,7 @@ async function callOpenAICompatible(options: RequestOptions): Promise<{ text: st
     throw new Error('Request cancelled');
   }
 
-  const baseUrl = import.meta.env.VITE_OPENCODE_API_URL || 'http://localhost:8317';
+  const baseUrl = import.meta.env.VITE_OPENCODE_API_URL || 'http://34.60.22.68:8080';
   const apiKey = import.meta.env.VITE_OPENCODE_API_KEY || 'hoainho';
 
   const controller = new AbortController();
