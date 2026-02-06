@@ -1,9 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { analyzeDiff } from './services/geminiService';
 import { fetchPrDiff, submitPrReview, parseGitHubUrl, fetchPRInfoFromUrl, checkMergeConflicts } from './services/githubService';
-import { PRIssue, Severity, ApprovalStatus, BugType, AnalysisProgress, ExportOptions, ReviewPreset, ReviewAnalytics, ReviewLogEntry } from './types';
+import { PRIssue, Severity, ApprovalStatus, BugType, AnalysisProgress, ExportOptions, ReviewPreset, ReviewAnalytics, ReviewLogEntry, ReviewHistory } from './types';
 import { ReviewTerminal } from './components/ReviewTerminal';
 import { RequirementTooltip } from './components/RequirementTooltip';
+import { ReviewHistoryList } from './components/ReviewHistoryList';
+import { ReviewHistoryDetail } from './components/ReviewHistoryDetail';
+import { LoginScreen } from './components/LoginScreen';
+import { useAuth } from './contexts/AuthContext';
 import type { GitHubMCPContext } from './services/githubMCPContext';
 import type { JiraConfluenceContext } from './services/jiraConfluenceMCP';
 import { initTheme, toggleTheme, getThemeConfig } from './services/darkMode';
@@ -50,7 +54,8 @@ import {
   Clock,
   ChevronDown,
   ChevronUp,
-  Activity
+  Activity,
+  LogOut
 } from 'lucide-react';
 
 const renderTextWithCode = (text: string): React.ReactNode => {
@@ -66,6 +71,8 @@ const renderTextWithCode = (text: string): React.ReactNode => {
 };
 
 const App: React.FC = () => {
+  const { user, isLoading: authLoading, isConfigured: authConfigured, signOut } = useAuth();
+
   const [githubUrl, setGithubUrl] = useState('');
   const [githubToken, setGithubToken] = useState('');
   const [loading, setLoading] = useState(false);
@@ -98,6 +105,8 @@ const App: React.FC = () => {
   const [showPresetDropdown, setShowPresetDropdown] = useState(false);
   const [analytics, setAnalytics] = useState<ReviewAnalytics | null>(null);
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [selectedHistoryReview, setSelectedHistoryReview] = useState<ReviewHistory | null>(null);
+  const [showHistoryTab, setShowHistoryTab] = useState<'summary' | 'history'>('summary');
   const [reviewLogs, setReviewLogs] = useState<ReviewLogEntry[]>([]);
   const [currentReviewFile, setCurrentReviewFile] = useState<string | undefined>();
   const [chunkProgress, setChunkProgress] = useState<{ current: number; total: number; percentage: number } | undefined>();
@@ -492,6 +501,18 @@ const App: React.FC = () => {
     rejected: results?.filter(i => i.approval_status === ApprovalStatus.REJECTED).length || 0,
   };
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+      </div>
+    );
+  }
+
+  if (authConfigured && !user) {
+    return <LoginScreen />;
+  }
+
   return (
     <div className="min-h-screen flex flex-col font-sans bg-slate-50/50 dark:bg-slate-900">
       <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-50 shadow-xl">
@@ -529,9 +550,30 @@ const App: React.FC = () => {
              >
                <Keyboard className="w-4 h-4 text-slate-400" />
              </button>
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-wider">
-              Bot: NhoNH
-            </span>
+            {user ? (
+              <div className="flex items-center space-x-2">
+                <img
+                  src={user.picture}
+                  alt={user.name}
+                  className="w-8 h-8 rounded-full border-2 border-indigo-500/50"
+                />
+                <div className="hidden sm:block">
+                  <p className="text-xs font-medium text-slate-200 leading-none">{user.name}</p>
+                  <p className="text-[10px] text-slate-400 leading-none mt-0.5">{user.email}</p>
+                </div>
+                <button
+                  onClick={signOut}
+                  className="p-1.5 rounded-lg hover:bg-slate-700/50 transition-colors"
+                  title="Sign out"
+                >
+                  <LogOut className="w-4 h-4 text-slate-400" />
+                </button>
+              </div>
+            ) : (
+              <span className="inline-flex items-center px-3 py-1 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-wider">
+                Bot: NhoNH
+              </span>
+            )}
           </div>
         </div>
       </header>
@@ -732,26 +774,28 @@ const App: React.FC = () => {
                </div>
                 {selectedPreset && (
                   <div className="flex-1 bg-slate-50 dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <Wand2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                        <div className="space-y-1">
-                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">Preset Active</p>
-                          <div className="flex items-center space-x-3 text-xs">
-                            <div className="flex items-center space-x-1">
-                              <span className={`w-2 h-2 rounded-full ${selectedPreset.js2026_enabled ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
-                              <span className="text-slate-700 dark:text-slate-300 font-medium">JS 2026</span>
-                            </div>
-                            <div className="flex items-center space-x-1">
-                              <span className={`w-2 h-2 rounded-full ${selectedPreset.performance_analysis ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
-                              <span className="text-slate-700 dark:text-slate-300 font-medium">Performance</span>
-                            </div>
-                            <div className="flex items-center space-x-1 pl-2 border-l border-slate-300 dark:border-slate-600">
-                              <span className="text-slate-700 dark:text-slate-300 font-medium">Severity:</span>
-                              <span className="font-bold text-indigo-600 dark:text-indigo-400">{selectedPreset.severity_threshold}</span>
-                            </div>
-                          </div>
-                        </div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <Wand2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                      <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">Preset Active</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors
+                        ${selectedPreset.js2026_enabled 
+                          ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' 
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${selectedPreset.js2026_enabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                        JS 2026
+                      </div>
+                      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors
+                        ${selectedPreset.performance_analysis 
+                          ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' 
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${selectedPreset.performance_analysis ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                        Performance
+                      </div>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900/30">
+                        <span className="text-slate-600 dark:text-slate-400">Severity:</span>
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400">{selectedPreset.severity_threshold}</span>
                       </div>
                     </div>
                   </div>
@@ -941,98 +985,147 @@ const App: React.FC = () => {
           </button>
           
           {showAnalytics && (
-            <div className="p-6 space-y-6 animate-in fade-in duration-300">
-              {!analytics || analytics.total_reviews === 0 ? (
-                <div className="text-center py-8">
-                  <Activity className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
-                  <p className="text-slate-500 dark:text-slate-400 font-medium">No review history yet</p>
-                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Analytics will appear after you complete your first review</p>
-                </div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/50 rounded-xl p-4 border border-indigo-100">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <BarChart3 className="w-4 h-4 text-indigo-600" />
-                        <span className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">Total Reviews</span>
-                      </div>
-                      <p className="text-2xl font-black text-indigo-900">{analytics.total_reviews}</p>
-                    </div>
-                    <div className="bg-gradient-to-br from-amber-50 to-amber-100/50 rounded-xl p-4 border border-amber-100">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <Bug className="w-4 h-4 text-amber-600" />
-                        <span className="text-[10px] font-black text-amber-700 uppercase tracking-widest">Avg Issues/PR</span>
-                      </div>
-                      <p className="text-2xl font-black text-amber-900">{analytics.average_issues_per_pr.toFixed(1)}</p>
-                    </div>
-                    <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 rounded-xl p-4 border border-emerald-100">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <TrendingUp className="w-4 h-4 text-emerald-600" />
-                        <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">Issue Types</span>
-                      </div>
-                      <p className="text-2xl font-black text-emerald-900">{analytics.most_common_issues.length}</p>
-                    </div>
-                    <div className="bg-gradient-to-br from-purple-50 to-purple-100/50 rounded-xl p-4 border border-purple-100">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <Clock className="w-4 h-4 text-purple-600" />
-                        <span className="text-[10px] font-black text-purple-700 uppercase tracking-widest">Avg Duration</span>
-                      </div>
-                      <p className="text-2xl font-black text-purple-900">
-                        {analytics.performance_trend.length > 0 
-                          ? `${(analytics.performance_trend.reduce((a, b) => a + b.average_duration, 0) / analytics.performance_trend.length / 1000).toFixed(1)}s`
-                          : '-'}
-                      </p>
-                    </div>
-                  </div>
+            <div className="animate-in fade-in duration-300">
+              <div className="flex border-b border-slate-200 dark:border-slate-700">
+                <button
+                  onClick={() => setShowHistoryTab('summary')}
+                  className={`px-6 py-3 text-sm font-semibold transition-colors ${
+                    showHistoryTab === 'summary'
+                      ? 'text-indigo-600 dark:text-indigo-400 border-b-2 border-indigo-600 dark:border-indigo-400'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                >
+                  Summary
+                </button>
+                <button
+                  onClick={() => setShowHistoryTab('history')}
+                  className={`px-6 py-3 text-sm font-semibold transition-colors ${
+                    showHistoryTab === 'history'
+                      ? 'text-indigo-600 dark:text-indigo-400 border-b-2 border-indigo-600 dark:border-indigo-400'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                >
+                  History
+                </button>
+              </div>
 
-                  {analytics.most_common_issues.length > 0 && (
-                    <div className="space-y-3">
-                      <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Most Common Issues</h3>
-                      <div className="space-y-2">
-                        {analytics.most_common_issues.slice(0, 5).map((issue, idx) => {
-                          const maxCount = analytics.most_common_issues[0]?.count || 1;
-                          const percentage = (issue.count / maxCount) * 100;
-                          return (
-                            <div key={idx} className="flex items-center space-x-3">
-                              <span className="text-xs font-bold text-slate-600 dark:text-slate-300 w-32 truncate">{issue.type.replace('_', ' ')}</span>
-                              <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
-                                <div 
-                                  className="bg-gradient-to-r from-indigo-500 to-indigo-600 h-2 rounded-full transition-all duration-500"
-                                  style={{ width: `${percentage}%` }}
-                                />
-                              </div>
-                              <span className="text-xs font-black text-slate-800 dark:text-slate-200 w-8 text-right">{issue.count}</span>
-                            </div>
-                          );
-                        })}
+              <div className="p-6 space-y-6">
+                {showHistoryTab === 'summary' ? (
+                  <>
+                    {!analytics || analytics.total_reviews === 0 ? (
+                      <div className="text-center py-8">
+                        <Activity className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
+                        <p className="text-slate-500 dark:text-slate-400 font-medium">No review history yet</p>
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Analytics will appear after you complete your first review</p>
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/50 dark:from-indigo-900/20 dark:to-indigo-800/10 rounded-xl p-4 border border-indigo-100 dark:border-indigo-800">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <BarChart3 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                              <span className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 uppercase tracking-widest">Total Reviews</span>
+                            </div>
+                            <p className="text-2xl font-black text-indigo-900 dark:text-indigo-100">{analytics.total_reviews}</p>
+                          </div>
+                          <div className="bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-900/20 dark:to-amber-800/10 rounded-xl p-4 border border-amber-100 dark:border-amber-800">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <Bug className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                              <span className="text-[10px] font-black text-amber-700 dark:text-amber-300 uppercase tracking-widest">Avg Issues/PR</span>
+                            </div>
+                            <p className="text-2xl font-black text-amber-900 dark:text-amber-100">{analytics.average_issues_per_pr.toFixed(1)}</p>
+                          </div>
+                          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-900/20 dark:to-emerald-800/10 rounded-xl p-4 border border-emerald-100 dark:border-emerald-800">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                              <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-300 uppercase tracking-widest">Issue Types</span>
+                            </div>
+                            <p className="text-2xl font-black text-emerald-900 dark:text-emerald-100">{analytics.most_common_issues.length}</p>
+                          </div>
+                          <div className="bg-gradient-to-br from-purple-50 to-purple-100/50 dark:from-purple-900/20 dark:to-purple-800/10 rounded-xl p-4 border border-purple-100 dark:border-purple-800">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <Clock className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                              <span className="text-[10px] font-black text-purple-700 dark:text-purple-300 uppercase tracking-widest">Avg Duration</span>
+                            </div>
+                            <p className="text-2xl font-black text-purple-900 dark:text-purple-100">
+                              {analytics.performance_trend.length > 0 
+                                ? `${(analytics.performance_trend.reduce((a, b) => a + b.average_duration, 0) / analytics.performance_trend.length / 1000).toFixed(1)}s`
+                                : '-'}
+                            </p>
+                          </div>
+                        </div>
 
-                  {analytics.trend_data.length > 1 && (
-                    <div className="space-y-3">
-                      <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Issues Trend (Last 7 Days)</h3>
-                      <div className="flex items-end space-x-1 h-20">
-                        {analytics.trend_data.slice(-7).map((day, idx) => {
-                          const maxIssues = Math.max(...analytics.trend_data.slice(-7).map(d => d.issues_count)) || 1;
-                          const height = (day.issues_count / maxIssues) * 100;
-                          return (
-                            <div key={idx} className="flex-1 flex flex-col items-center">
-                              <div 
-                                className="w-full bg-gradient-to-t from-indigo-500 to-indigo-400 rounded-t-sm transition-all duration-300 hover:from-indigo-600 hover:to-indigo-500"
-                                style={{ height: `${Math.max(height, 4)}%` }}
-                                title={`${day.date}: ${day.issues_count} issues`}
-                              />
-                              <span className="text-[8px] text-slate-400 mt-1">{new Date(day.date).toLocaleDateString('en', { weekday: 'short' })}</span>
+                        {analytics.most_common_issues.length > 0 && (
+                          <div className="space-y-3">
+                            <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Most Common Issues</h3>
+                            <div className="space-y-2">
+                              {analytics.most_common_issues.slice(0, 5).map((issue, idx) => {
+                                const maxCount = analytics.most_common_issues[0]?.count || 1;
+                                const percentage = (issue.count / maxCount) * 100;
+                                return (
+                                  <div key={idx} className="flex items-center space-x-3">
+                                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300 w-32 truncate">{issue.type.replace('_', ' ')}</span>
+                                    <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+                                      <div 
+                                        className="bg-gradient-to-r from-indigo-500 to-indigo-600 h-2 rounded-full transition-all duration-500"
+                                        style={{ width: `${percentage}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-xs font-black text-slate-800 dark:text-slate-200 w-8 text-right">{issue.count}</span>
+                                  </div>
+                                );
+                              })}
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
+                          </div>
+                        )}
+
+                        {analytics.trend_data.length > 1 && (
+                          <div className="space-y-3">
+                            <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Issues Trend (Last 7 Days)</h3>
+                            <div className="flex items-end space-x-1 h-20">
+                              {analytics.trend_data.slice(-7).map((day, idx) => {
+                                const maxIssues = Math.max(...analytics.trend_data.slice(-7).map(d => d.issues_count)) || 1;
+                                const height = (day.issues_count / maxIssues) * 100;
+                                return (
+                                  <div key={idx} className="flex-1 flex flex-col items-center">
+                                    <div 
+                                      className="w-full bg-gradient-to-t from-indigo-500 to-indigo-400 rounded-t-sm transition-all duration-300 hover:from-indigo-600 hover:to-indigo-500"
+                                      style={{ height: `${Math.max(height, 4)}%` }}
+                                      title={`${day.date}: ${day.issues_count} issues`}
+                                    />
+                                    <span className="text-[8px] text-slate-400 mt-1">{new Date(day.date).toLocaleDateString('en', { weekday: 'short' })}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <ReviewHistoryList
+                    onSelectReview={(review) => setSelectedHistoryReview(review)}
+                    onRefresh={async () => {
+                      const data = await calculateAnalytics();
+                      setAnalytics(data);
+                    }}
+                  />
+                )}
+              </div>
             </div>
+          )}
+
+          {selectedHistoryReview && (
+            <ReviewHistoryDetail
+              review={selectedHistoryReview}
+              onClose={() => setSelectedHistoryReview(null)}
+              onReanalyze={(prUrl) => {
+                setGithubUrl(prUrl);
+                setSelectedHistoryReview(null);
+                setShowAnalytics(false);
+              }}
+            />
           )}
         </section>
 
