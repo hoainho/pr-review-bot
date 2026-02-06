@@ -439,27 +439,175 @@ function formatSummaryBody(issues: any[], botName: string): string {
   return lines.join('\n');
 }
 
+/**
+ * Parse diff hunk header to extract line ranges
+ * Format: @@ -oldStart,oldCount +newStart,newCount @@
+ */
+function parseDiffHunkRanges(patch: string): { start: number; end: number }[] {
+  const ranges: { start: number; end: number }[] = [];
+  const hunkRegex = /@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/g;
+  let match;
+  
+  while ((match = hunkRegex.exec(patch)) !== null) {
+    const start = parseInt(match[1], 10);
+    const count = match[2] ? parseInt(match[2], 10) : 1;
+    ranges.push({ start, end: start + count - 1 });
+  }
+  
+  return ranges;
+}
+
+/**
+ * Check if a line number is within any of the diff hunks
+ */
+function isLineInDiff(line: number, ranges: { start: number; end: number }[]): boolean {
+  return ranges.some(range => line >= range.start && line <= range.end);
+}
+
+/**
+ * Fetch PR files to get valid paths and their diff ranges
+ */
+async function fetchPRFilesForValidation(
+  info: GitHubPrInfo,
+  token: string
+): Promise<Map<string, { start: number; end: number }[]>> {
+  const fileRanges = new Map<string, { start: number; end: number }[]>();
+  
+  const response = await fetch(
+    `${GITHUB_API_BASE}/repos/${info.owner}/${info.repo}/pulls/${info.pullNumber}/files?per_page=100`,
+    {
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: 'application/vnd.github.v3+json',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    console.warn('Failed to fetch PR files for validation');
+    return fileRanges;
+  }
+
+  const files: PRFile[] = await response.json();
+  
+  for (const file of files) {
+    if (file.patch) {
+      const ranges = parseDiffHunkRanges(file.patch);
+      fileRanges.set(file.filename, ranges);
+      
+      // Also map without leading paths for fuzzy matching
+      const baseName = file.filename.split('/').pop();
+      if (baseName && baseName !== file.filename) {
+        fileRanges.set(baseName, ranges);
+      }
+    }
+  }
+  
+  return fileRanges;
+}
+
+function findMatchingPath(
+  issuePath: string,
+  validPaths: Map<string, { start: number; end: number }[]>
+): string | null {
+  if (validPaths.has(issuePath)) {
+    return issuePath;
+  }
+  
+  const withoutLeadingSlash = issuePath.replace(/^\//, '');
+  if (validPaths.has(withoutLeadingSlash)) {
+    return withoutLeadingSlash;
+  }
+  
+  const baseName = issuePath.split('/').pop();
+  for (const [path] of validPaths) {
+    if (path.endsWith(issuePath) || path.endsWith(`/${issuePath}`)) {
+      return path;
+    }
+    if (baseName && path.endsWith(baseName)) {
+      return path;
+    }
+  }
+  
+  return null;
+}
+
 export const submitPrReview = async (
   url: string, 
   token: string, 
   issues: any[], 
   botName: string
-): Promise<void> => {
+): Promise<{ posted: number; skipped: number; skippedIssues: string[] }> => {
   const info = parseGitHubUrl(url);
   if (!info) throw new Error("Invalid GitHub PR URL");
 
-  const reviewComments = issues.map((issue) => {
-    const rawLine = issue.line_numbers?.toString().split('-').pop() || '1';
-    const targetLine = parseInt(rawLine, 10);
+  const fileRanges = await fetchPRFilesForValidation(info, token);
+  const skippedIssues: string[] = [];
 
-    return {
-      path: issue.file_name,
-      line: isNaN(targetLine) ? 1 : targetLine,
-      body: formatCommentBody(issue),
-    };
-  });
+  const reviewComments = issues
+    .map((issue) => {
+      const rawLine = issue.line_numbers?.toString().split('-').pop() || '1';
+      const targetLine = parseInt(rawLine, 10);
+      const line = isNaN(targetLine) ? 1 : targetLine;
+
+      const matchedPath = findMatchingPath(issue.file_name, fileRanges);
+      
+      if (!matchedPath) {
+        skippedIssues.push(`${issue.file_name}:${line} - file not in PR diff`);
+        return null;
+      }
+
+      const ranges = fileRanges.get(matchedPath);
+      if (ranges && ranges.length > 0 && !isLineInDiff(line, ranges)) {
+        const closestRange = ranges[0];
+        const adjustedLine = Math.max(closestRange.start, Math.min(line, closestRange.end));
+        
+        if (adjustedLine !== line) {
+          console.warn(`Adjusted line ${line} to ${adjustedLine} for ${matchedPath}`);
+        }
+        
+        return {
+          path: matchedPath,
+          line: adjustedLine,
+          body: formatCommentBody(issue),
+        };
+      }
+
+      return {
+        path: matchedPath,
+        line,
+        body: formatCommentBody(issue),
+      };
+    })
+    .filter((comment): comment is NonNullable<typeof comment> => comment !== null);
 
   const bodySummary = formatSummaryBody(issues, botName);
+
+  if (reviewComments.length === 0) {
+    const response = await fetch(
+      `https://api.github.com/repos/${info.owner}/${info.repo}/pulls/${info.pullNumber}/reviews`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `token ${token}`,
+          "Content-Type": "application/json",
+          Accept: "application/vnd.github.v3+json",
+        },
+        body: JSON.stringify({
+          body: bodySummary + `\n\n*Note: ${skippedIssues.length} comments could not be posted as inline comments (files/lines not in diff).*`,
+          event: "COMMENT",
+          comments: [],
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: "Unknown error" }));
+      throw new Error(`GitHub API Error: ${error.message || response.statusText}`);
+    }
+
+    return { posted: 0, skipped: skippedIssues.length, skippedIssues };
+  }
 
   const response = await fetch(
     `https://api.github.com/repos/${info.owner}/${info.repo}/pulls/${info.pullNumber}/reviews`,
@@ -468,11 +616,11 @@ export const submitPrReview = async (
       headers: {
         Authorization: `token ${token}`,
         "Content-Type": "application/json",
-        Accept: "application/vnd.github.v1+json",
+        Accept: "application/vnd.github.v3+json",
       },
       body: JSON.stringify({
         body: bodySummary,
-        event: "COMMENT", // You could change this to "REQUEST_CHANGES" if issues.length > 0
+        event: "COMMENT",
         comments: reviewComments,
       }),
     }
@@ -480,6 +628,37 @@ export const submitPrReview = async (
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: "Unknown error" }));
+    
+    if (error.errors?.some((e: any) => e === "Path could not be resolved")) {
+      console.warn("Some paths still invalid, posting summary only");
+      
+      const fallbackResponse = await fetch(
+        `https://api.github.com/repos/${info.owner}/${info.repo}/pulls/${info.pullNumber}/reviews`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `token ${token}`,
+            "Content-Type": "application/json",
+            Accept: "application/vnd.github.v3+json",
+          },
+          body: JSON.stringify({
+            body: bodySummary + `\n\n*Note: Inline comments could not be posted due to path resolution issues.*`,
+            event: "COMMENT",
+            comments: [],
+          }),
+        }
+      );
+
+      if (!fallbackResponse.ok) {
+        const fallbackError = await fallbackResponse.json().catch(() => ({ message: "Unknown error" }));
+        throw new Error(`GitHub API Error: ${fallbackError.message || fallbackResponse.statusText}`);
+      }
+
+      return { posted: 0, skipped: issues.length, skippedIssues: issues.map(i => `${i.file_name}:${i.line_numbers}`) };
+    }
+    
     throw new Error(`GitHub API Error: ${error.message || response.statusText}`);
   }
+
+  return { posted: reviewComments.length, skipped: skippedIssues.length, skippedIssues };
 };

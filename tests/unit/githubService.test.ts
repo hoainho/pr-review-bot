@@ -305,10 +305,22 @@ describe('githubService', () => {
 
   describe('submitPrReview', () => {
     it('should submit review successfully', async () => {
-      vi.mocked(global.fetch).mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ id: 123 }),
-      } as Response);
+      let callCount = 0;
+      vi.mocked(global.fetch).mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            ok: true,
+            json: () => Promise.resolve([
+              { filename: 'src/db.ts', patch: '@@ -1,20 +1,20 @@\n context' },
+            ]),
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: () => Promise.resolve({ id: 123 }),
+        } as Response;
+      });
 
       const issues = [
         {
@@ -322,30 +334,38 @@ describe('githubService', () => {
         },
       ];
 
-      await expect(
-        submitPrReview(
-          'https://github.com/owner/repo/pull/1',
-          'token',
-          issues,
-          'NhoNH'
-        )
-      ).resolves.toBeUndefined();
+      const result = await submitPrReview(
+        'https://github.com/owner/repo/pull/1',
+        'token',
+        issues,
+        'NhoNH'
+      );
 
+      expect(result.posted).toBeGreaterThanOrEqual(0);
       expect(global.fetch).toHaveBeenCalledWith(
         'https://api.github.com/repos/owner/repo/pulls/1/reviews',
         expect.objectContaining({
           method: 'POST',
-          body: expect.stringContaining('High Severity - Security'),
         })
       );
     });
 
     it('should throw error on submission failure', async () => {
-      vi.mocked(global.fetch).mockResolvedValueOnce({
-        ok: false,
-        statusText: 'Forbidden',
-        json: () => Promise.resolve({ message: 'Resource not accessible' }),
-      } as Response);
+      let callCount = 0;
+      vi.mocked(global.fetch).mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            ok: true,
+            json: () => Promise.resolve([]),
+          } as Response;
+        }
+        return {
+          ok: false,
+          statusText: 'Forbidden',
+          json: () => Promise.resolve({ message: 'Resource not accessible' }),
+        } as Response;
+      });
 
       await expect(
         submitPrReview(

@@ -401,9 +401,16 @@ const App: React.FC = () => {
     setPosting(true);
     setError(null);
     try {
-      await submitPrReview(githubUrl, githubToken, approvedIssues, 'NhoNH');
-      setSuccess(`Successfully posted ${approvedIssues.length} review comments to GitHub!`);
-      // Reset all to rejected after successful submission
+      const result = await submitPrReview(githubUrl, githubToken, approvedIssues, 'NhoNH');
+      
+      if (result.skipped > 0 && result.posted === 0) {
+        setSuccess(`Review summary posted. ${result.skipped} inline comments skipped (files/lines not in diff).`);
+      } else if (result.skipped > 0) {
+        setSuccess(`Posted ${result.posted} comments. ${result.skipped} skipped (files/lines not in diff).`);
+      } else {
+        setSuccess(`Successfully posted ${result.posted} review comments to GitHub!`);
+      }
+      
       setResults(results.map(issue => ({
         ...issue,
         approval_status: ApprovalStatus.REJECTED

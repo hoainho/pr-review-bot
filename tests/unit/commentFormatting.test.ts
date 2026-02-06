@@ -1,6 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { submitPrReview } from '../../services/githubService';
 
+function mockFetchForReview(onReviewCall: (body: string) => void) {
+  let callCount = 0;
+  vi.mocked(global.fetch).mockImplementation(async (url, options) => {
+    callCount++;
+    if (callCount === 1) {
+      return { 
+        ok: true, 
+        json: () => Promise.resolve([
+          { filename: 'test.ts', patch: '@@ -1,10 +1,10 @@\n context' },
+          { filename: 'a.ts', patch: '@@ -1,5 +1,5 @@\n context' },
+          { filename: 'b.ts', patch: '@@ -1,5 +2,5 @@\n context' },
+          { filename: 'c.ts', patch: '@@ -1,5 +3,5 @@\n context' },
+          { filename: 'd.ts', patch: '@@ -1,5 +4,5 @@\n context' },
+        ]) 
+      } as Response;
+    }
+    onReviewCall((options as RequestInit).body as string);
+    return { ok: true, json: () => Promise.resolve({}) } as Response;
+  });
+}
+
 describe('Comment Formatting - Template C (Human Conversational)', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -9,10 +30,7 @@ describe('Comment Formatting - Template C (Human Conversational)', () => {
   describe('Individual Comment Format', () => {
     it('should format HIGH severity comment correctly', async () => {
       let capturedBody = '';
-      vi.mocked(global.fetch).mockImplementationOnce(async (_, options) => {
-        capturedBody = (options as RequestInit).body as string;
-        return { ok: true, json: () => Promise.resolve({}) } as Response;
-      });
+      mockFetchForReview((body) => { capturedBody = body; });
 
       const issues = [{
         severity: 'HIGH',
@@ -34,10 +52,7 @@ describe('Comment Formatting - Template C (Human Conversational)', () => {
 
     it('should format MEDIUM severity comment correctly', async () => {
       let capturedBody = '';
-      vi.mocked(global.fetch).mockImplementationOnce(async (_, options) => {
-        capturedBody = (options as RequestInit).body as string;
-        return { ok: true, json: () => Promise.resolve({}) } as Response;
-      });
+      mockFetchForReview((body) => { capturedBody = body; });
 
       const issues = [{
         severity: 'MEDIUM',
@@ -56,10 +71,7 @@ describe('Comment Formatting - Template C (Human Conversational)', () => {
 
     it('should format LOW severity comment correctly', async () => {
       let capturedBody = '';
-      vi.mocked(global.fetch).mockImplementationOnce(async (_, options) => {
-        capturedBody = (options as RequestInit).body as string;
-        return { ok: true, json: () => Promise.resolve({}) } as Response;
-      });
+      mockFetchForReview((body) => { capturedBody = body; });
 
       const issues = [{
         severity: 'LOW',
@@ -78,10 +90,7 @@ describe('Comment Formatting - Template C (Human Conversational)', () => {
 
     it('should NOT contain any emoji characters', async () => {
       let capturedBody = '';
-      vi.mocked(global.fetch).mockImplementationOnce(async (_, options) => {
-        capturedBody = (options as RequestInit).body as string;
-        return { ok: true, json: () => Promise.resolve({}) } as Response;
-      });
+      mockFetchForReview((body) => { capturedBody = body; });
 
       const issues = [{
         severity: 'HIGH',
@@ -101,10 +110,7 @@ describe('Comment Formatting - Template C (Human Conversational)', () => {
 
     it('should include suggestion code block when provided', async () => {
       let capturedBody = '';
-      vi.mocked(global.fetch).mockImplementationOnce(async (_, options) => {
-        capturedBody = (options as RequestInit).body as string;
-        return { ok: true, json: () => Promise.resolve({}) } as Response;
-      });
+      mockFetchForReview((body) => { capturedBody = body; });
 
       const issues = [{
         severity: 'MEDIUM',
@@ -124,10 +130,7 @@ describe('Comment Formatting - Template C (Human Conversational)', () => {
 
     it('should include horizontal rule separator', async () => {
       let capturedBody = '';
-      vi.mocked(global.fetch).mockImplementationOnce(async (_, options) => {
-        capturedBody = (options as RequestInit).body as string;
-        return { ok: true, json: () => Promise.resolve({}) } as Response;
-      });
+      mockFetchForReview((body) => { capturedBody = body; });
 
       const issues = [{
         severity: 'LOW',
@@ -148,10 +151,7 @@ describe('Comment Formatting - Template C (Human Conversational)', () => {
   describe('Summary Comment Format', () => {
     it('should format summary with correct counts', async () => {
       let capturedBody = '';
-      vi.mocked(global.fetch).mockImplementationOnce(async (_, options) => {
-        capturedBody = (options as RequestInit).body as string;
-        return { ok: true, json: () => Promise.resolve({}) } as Response;
-      });
+      mockFetchForReview((body) => { capturedBody = body; });
 
       const issues = [
         { severity: 'HIGH', bug_type: 'SECURITY', bug_description: 'Issue 1', suggested_fix: 'Fix 1', suggested_code: '', file_name: 'a.ts', line_numbers: '1' },
@@ -171,10 +171,7 @@ describe('Comment Formatting - Template C (Human Conversational)', () => {
 
     it('should include reviewer signature in summary', async () => {
       let capturedBody = '';
-      vi.mocked(global.fetch).mockImplementationOnce(async (_, options) => {
-        capturedBody = (options as RequestInit).body as string;
-        return { ok: true, json: () => Promise.resolve({}) } as Response;
-      });
+      mockFetchForReview((body) => { capturedBody = body; });
 
       await submitPrReview('https://github.com/o/r/pull/1', 'token', [], 'NhoNH');
 
@@ -183,10 +180,7 @@ describe('Comment Formatting - Template C (Human Conversational)', () => {
 
     it('should NOT contain emoji in summary', async () => {
       let capturedBody = '';
-      vi.mocked(global.fetch).mockImplementationOnce(async (_, options) => {
-        capturedBody = (options as RequestInit).body as string;
-        return { ok: true, json: () => Promise.resolve({}) } as Response;
-      });
+      mockFetchForReview((body) => { capturedBody = body; });
 
       const issues = [
         { severity: 'HIGH', bug_type: 'SECURITY', bug_description: 'X', suggested_fix: 'Y', suggested_code: '', file_name: 'a.ts', line_numbers: '1' },
@@ -215,10 +209,7 @@ describe('Comment Formatting - Template C (Human Conversational)', () => {
     bugTypes.forEach(({ type, expected }) => {
       it(`should format ${type} as "${expected}"`, async () => {
         let capturedBody = '';
-        vi.mocked(global.fetch).mockImplementationOnce(async (_, options) => {
-          capturedBody = (options as RequestInit).body as string;
-          return { ok: true, json: () => Promise.resolve({}) } as Response;
-        });
+        mockFetchForReview((body) => { capturedBody = body; });
 
         const issues = [{
           severity: 'MEDIUM',
