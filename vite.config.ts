@@ -25,7 +25,7 @@ export default defineConfig({
           'vendor-icons': ['lucide-react'],
           'vendor-ai': ['@google/genai'],
           'services-core': [
-            './services/geminiService',
+            './services/aiService',
             './services/githubService',
             './services/modelRotation',
           ],

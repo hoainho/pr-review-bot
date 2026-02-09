@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { analyzeDiff } from './services/geminiService';
+import { analyzeDiff } from './services/aiService';
 import { fetchPrDiff, submitPrReview, parseGitHubUrl, fetchPRInfoFromUrl, checkMergeConflicts } from './services/githubService';
 import { PRIssue, Severity, ApprovalStatus, BugType, AnalysisProgress, ExportOptions, ReviewPreset, ReviewAnalytics, ReviewLogEntry, ReviewHistory } from './types';
 import { ReviewTerminal } from './components/ReviewTerminal';
@@ -7,6 +7,9 @@ import { RequirementTooltip } from './components/RequirementTooltip';
 import { ReviewHistoryList } from './components/ReviewHistoryList';
 import { ReviewHistoryDetail } from './components/ReviewHistoryDetail';
 import { LoginScreen } from './components/LoginScreen';
+import { DocumentationPage } from './components/DocumentationPage';
+import { SecurityPage } from './components/SecurityPage';
+import { SupportPage } from './components/SupportPage';
 import { useAuth } from './contexts/AuthContext';
 import type { GitHubMCPContext } from './services/githubMCPContext';
 import type { JiraConfluenceContext } from './services/jiraConfluenceMCP';
@@ -114,6 +117,7 @@ const App: React.FC = () => {
   const [isCancelled, setIsCancelled] = useState(false);
   const pauseRef = useRef(false);
   const cancelRef = useRef(false);
+  const [currentPage, setCurrentPage] = useState<'main' | 'docs' | 'security' | 'support'>('main');
 
   const addLog = (type: ReviewLogEntry['type'], message: string, details?: ReviewLogEntry['details']) => {
     setReviewLogs(prev => [...prev, { timestamp: Date.now(), type, message, details }]);
@@ -509,8 +513,22 @@ const App: React.FC = () => {
     );
   }
 
-  if (authConfigured && !user) {
+  const requiresAuthentication = import.meta.env.MODE === 'production';
+  
+  if (requiresAuthentication && !user) {
     return <LoginScreen />;
+  }
+
+  if (currentPage === 'docs') {
+    return <DocumentationPage onBack={() => setCurrentPage('main')} />;
+  }
+
+  if (currentPage === 'security') {
+    return <SecurityPage onBack={() => setCurrentPage('main')} />;
+  }
+
+  if (currentPage === 'support') {
+    return <SupportPage onBack={() => setCurrentPage('main')} />;
   }
 
   return (
@@ -530,9 +548,13 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center space-x-3">
-             <div className="hidden md:flex items-center space-x-2 px-3 py-1 bg-slate-800/50 rounded-full border border-slate-700/50">
-               <Sparkles className="w-3 h-3 text-indigo-400" />
-               <span className="text-[10px] font-bold text-slate-300">Gemini 3 Pro</span>
+             <div className="hidden md:flex items-center space-x-2 px-3 py-1.5 bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-pink-500/10 rounded-full border border-indigo-500/30">
+               <div className="flex -space-x-1">
+                 <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                 <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" style={{ animationDelay: '0.2s' }} />
+                 <div className="w-2 h-2 rounded-full bg-pink-400 animate-pulse" style={{ animationDelay: '0.4s' }} />
+               </div>
+               <span className="text-[10px] font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 uppercase tracking-wider">Multi-AI Engine</span>
              </div>
              <button
                onClick={handleToggleTheme}
@@ -646,6 +668,18 @@ const App: React.FC = () => {
       )}
 
        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {user && !user.hasGeminiAccess && (
+          <section className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400" />
+              <div>
+                <p className="text-sm font-medium text-amber-400">Limited Access</p>
+                <p className="text-xs text-slate-400">Sign out and sign in again to grant Gemini API access.</p>
+              </div>
+            </div>
+          </section>
+        )}
+
 <section className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
           <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 flex items-center justify-between">
             <div className="flex items-center space-x-2">
@@ -1064,7 +1098,7 @@ const App: React.FC = () => {
                                 const percentage = (issue.count / maxCount) * 100;
                                 return (
                                   <div key={idx} className="flex items-center space-x-3">
-                                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300 w-32 truncate">{issue.type.replace('_', ' ')}</span>
+                                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300 w-32 truncate">{(issue.type || 'UNKNOWN').replace(/_/g, ' ')}</span>
                                     <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
                                       <div 
                                         className="bg-gradient-to-r from-indigo-500 to-indigo-600 h-2 rounded-full transition-all duration-500"
@@ -1280,7 +1314,7 @@ const App: React.FC = () => {
                           {issue.severity}
                         </span>
                         <span className="px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-slate-900 text-white border border-slate-800">
-                          {issue.bug_type.replace('_', ' ')}
+                          {(issue.bug_type || 'UNKNOWN').replace(/_/g, ' ')}
                         </span>
                         {issue.prd_related && (
                           issue.prd_requirement ? (
@@ -1425,9 +1459,9 @@ const App: React.FC = () => {
             
             <div className="flex flex-col items-center md:items-end space-y-6">
               <div className="flex space-x-8 text-slate-400 font-black text-[10px] uppercase tracking-widest">
-                 <a href="#" className="hover:text-white transition-colors">Documentation</a>
-                 <a href="#" className="hover:text-white transition-colors">Security</a>
-                 <a href="#" className="hover:text-white transition-colors">Support</a>
+                 <button onClick={() => setCurrentPage('docs')} className="hover:text-white transition-colors">Documentation</button>
+                 <button onClick={() => setCurrentPage('security')} className="hover:text-white transition-colors">Security</button>
+                 <button onClick={() => setCurrentPage('support')} className="hover:text-white transition-colors">Support</button>
               </div>
               <p className="text-[10px] text-slate-600 font-black tracking-[0.3em] uppercase">
                 &copy; {new Date().getFullYear()} NhoNH &bull; All Rights Reserved

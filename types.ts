@@ -19,7 +19,23 @@ export enum BugType {
   CODE_DUPLICATION = 'CODE_DUPLICATION',
   BREAKING_CHANGE = 'BREAKING_CHANGE',
   DEPENDENCY_ISSUE = 'DEPENDENCY_ISSUE',
-  JS_SYNTAX_OPTIMIZATION = 'JS_SYNTAX_OPTIMIZATION'
+  JS_SYNTAX_OPTIMIZATION = 'JS_SYNTAX_OPTIMIZATION',
+  // React best practices
+  REACT_WATERFALL = 'REACT_WATERFALL',
+  REACT_BUNDLE_SIZE = 'REACT_BUNDLE_SIZE',
+  REACT_SERVER_PERF = 'REACT_SERVER_PERF',
+  REACT_CLIENT_PERF = 'REACT_CLIENT_PERF',
+  REACT_RERENDER = 'REACT_RERENDER',
+  REACT_RENDERING = 'REACT_RENDERING',
+  REACT_ANTI_PATTERN = 'REACT_ANTI_PATTERN',
+  // TypeScript best practices
+  TS_TYPE_SAFETY = 'TS_TYPE_SAFETY',
+  TS_NULL_SAFETY = 'TS_NULL_SAFETY',
+  TS_GENERICS = 'TS_GENERICS',
+  TS_ENUM = 'TS_ENUM',
+  TS_STRICT_MODE = 'TS_STRICT_MODE',
+  TS_IMPORTS = 'TS_IMPORTS',
+  TS_PATTERNS = 'TS_PATTERNS'
 }
 
 export enum ApprovalStatus {
@@ -60,6 +76,25 @@ export interface ReviewResponse {
   duplications?: CodeDuplication[];
   dependencies?: DependencyIssue[];
   jsSyntaxImprovements?: JSSyntaxImprovement[];
+  reactIssues?: ReactBestPracticesIssue[];
+}
+
+export interface ReactBestPracticesIssue {
+  id: string;
+  ruleId: string;
+  ruleName: string;
+  category: string;
+  severity: Severity;
+  fileName: string;
+  lineNumbers: string;
+  snippet: string;
+  description: string;
+  impact: string;
+  suggestedFix: string;
+  suggestedCode: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  aiVerified: boolean;
+  references?: string[];
 }
 
 export enum CommentCategory {
@@ -290,4 +325,32 @@ export interface Command {
   category: string;
   icon?: string;
   hotkey?: string;
+}
+
+export interface AntigravityCredentials {
+  access_token: string;
+  refresh_token: string;
+  email: string;
+  project_id: string;
+  type: 'antigravity';
+  expired: string;
+  expires_in: number;
+  timestamp: number;
+  disabled?: boolean;
+}
+
+export interface CredentialsStatus {
+  hasCredentials: boolean;
+  email?: string;
+  type?: string;
+  expired?: string;
+  isExpired?: boolean;
+}
+
+export interface CredentialsUploadResponse {
+  success: boolean;
+  message?: string;
+  email?: string;
+  expires_at?: string;
+  error?: string;
 }

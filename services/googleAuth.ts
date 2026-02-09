@@ -1,6 +1,6 @@
 /**
  * Google OAuth Authentication Service
- * Uses Google Identity Services (GIS) for modern OAuth 2.0 flow
+ * Uses Authorization Code Flow to get tokens for Gemini API access
  */
 
 export interface GoogleUser {
@@ -9,11 +9,7 @@ export interface GoogleUser {
   name: string;
   picture: string;
   idToken: string;
-}
-
-interface GoogleCredentialResponse {
-  credential: string;
-  select_by: string;
+  hasGeminiAccess?: boolean;
 }
 
 interface DecodedJWT {
@@ -25,15 +21,38 @@ interface DecodedJWT {
   iat: number;
 }
 
+interface CodeClientConfig {
+  client_id: string;
+  scope: string;
+  callback: (response: { code?: string; error?: string }) => void;
+  ux_mode?: 'popup' | 'redirect';
+  redirect_uri?: string;
+  state?: string;
+  select_account?: boolean;
+  hint?: string;
+}
+
+interface TokenClientConfig {
+  client_id: string;
+  scope: string;
+  callback: (response: { access_token?: string; error?: string; expires_in?: number }) => void;
+  prompt?: string;
+}
+
 const STORAGE_KEY = 'gear_pr_review_google_user';
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const PROXY_URL = import.meta.env.VITE_PROXY_URL || 'https://proxy.hoainho.info';
+
+const GEMINI_SCOPE = 'https://www.googleapis.com/auth/generative-language.retriever';
+const BASE_SCOPES = 'openid email profile';
+const FULL_SCOPES = `${BASE_SCOPES} ${GEMINI_SCOPE}`;
 
 let googleInitialized = false;
+let codeClient: { requestCode: () => void } | null = null;
 let onAuthChangeCallback: ((user: GoogleUser | null) => void) | null = null;
+let pendingAuthResolve: ((user: GoogleUser) => void) | null = null;
+let pendingAuthReject: ((error: Error) => void) | null = null;
 
-/**
- * Decode JWT token without external library
- */
 function decodeJWT(token: string): DecodedJWT {
   const base64Url = token.split('.')[1];
   const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
@@ -46,9 +65,6 @@ function decodeJWT(token: string): DecodedJWT {
   return JSON.parse(jsonPayload);
 }
 
-/**
- * Check if token is expired
- */
 function isTokenExpired(idToken: string): boolean {
   try {
     const decoded = decodeJWT(idToken);
@@ -59,9 +75,6 @@ function isTokenExpired(idToken: string): boolean {
   }
 }
 
-/**
- * Load Google Identity Services script
- */
 function loadGoogleScript(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (document.getElementById('google-gsi-script')) {
@@ -80,36 +93,79 @@ function loadGoogleScript(): Promise<void> {
   });
 }
 
-/**
- * Handle credential response from Google
- */
-function handleCredentialResponse(response: GoogleCredentialResponse): void {
-  try {
-    const decoded = decodeJWT(response.credential);
-    const user: GoogleUser = {
-      id: decoded.sub,
-      email: decoded.email,
-      name: decoded.name,
-      picture: decoded.picture,
-      idToken: response.credential,
-    };
+async function exchangeCodeForTokens(code: string): Promise<GoogleUser> {
+  const response = await fetch(`${PROXY_URL}/v0/auth/google/callback`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      code,
+      redirect_uri: window.location.origin,
+      client_id: CLIENT_ID,
+    }),
+  });
 
-    // Store user in localStorage
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || `Token exchange failed: ${response.status}`);
+  }
 
-    // Notify listeners
-    if (onAuthChangeCallback) {
-      onAuthChangeCallback(user);
+  const data = await response.json();
+  
+  if (!data.success) {
+    throw new Error(data.message || 'Token exchange failed');
+  }
+
+  const user: GoogleUser = {
+    id: data.user_id || data.email,
+    email: data.email,
+    name: data.name || data.email.split('@')[0],
+    picture: data.picture || '',
+    idToken: data.id_token || '',
+    hasGeminiAccess: data.has_gemini_access ?? true,
+  };
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+
+  if (onAuthChangeCallback) {
+    onAuthChangeCallback(user);
+  }
+
+  return user;
+}
+
+function handleCodeResponse(response: { code?: string; error?: string }): void {
+  if (response.error) {
+    console.error('Google auth error:', response.error);
+    if (pendingAuthReject) {
+      pendingAuthReject(new Error(response.error));
+      pendingAuthReject = null;
+      pendingAuthResolve = null;
     }
-  } catch (error) {
-    console.error('Failed to decode Google credential:', error);
+    return;
+  }
+
+  if (response.code) {
+    exchangeCodeForTokens(response.code)
+      .then((user) => {
+        if (pendingAuthResolve) {
+          pendingAuthResolve(user);
+          pendingAuthResolve = null;
+          pendingAuthReject = null;
+        }
+      })
+      .catch((error) => {
+        console.error('Token exchange failed:', error);
+        if (pendingAuthReject) {
+          pendingAuthReject(error);
+          pendingAuthReject = null;
+          pendingAuthResolve = null;
+        }
+      });
   }
 }
 
-/**
- * Initialize Google OAuth
- * Must be called before any auth operations
- */
 export async function initGoogleAuth(): Promise<void> {
   if (!CLIENT_ID) {
     console.warn('VITE_GOOGLE_CLIENT_ID not configured. Google OAuth disabled.');
@@ -122,10 +178,9 @@ export async function initGoogleAuth(): Promise<void> {
 
   await loadGoogleScript();
 
-  // Wait for google object to be available
   await new Promise<void>((resolve) => {
     const checkGoogle = () => {
-      if (window.google?.accounts?.id) {
+      if (window.google?.accounts?.oauth2) {
         resolve();
       } else {
         setTimeout(checkGoogle, 100);
@@ -134,20 +189,17 @@ export async function initGoogleAuth(): Promise<void> {
     checkGoogle();
   });
 
-  window.google.accounts.id.initialize({
+  codeClient = window.google!.accounts.oauth2.initCodeClient({
     client_id: CLIENT_ID,
-    callback: handleCredentialResponse,
-    auto_select: true,
-    cancel_on_tap_outside: false,
-    use_fedcm_for_prompt: true,
+    scope: FULL_SCOPES,
+    ux_mode: 'popup',
+    callback: handleCodeResponse,
+    select_account: true,
   });
 
   googleInitialized = true;
 }
 
-/**
- * Trigger Google Sign-In popup
- */
 export function signIn(): Promise<GoogleUser> {
   return new Promise((resolve, reject) => {
     if (!CLIENT_ID) {
@@ -155,36 +207,18 @@ export function signIn(): Promise<GoogleUser> {
       return;
     }
 
-    if (!googleInitialized || !window.google?.accounts?.id) {
+    if (!googleInitialized || !codeClient) {
       reject(new Error('Google OAuth not initialized. Call initGoogleAuth() first.'));
       return;
     }
 
-    // Set up one-time callback
-    const originalCallback = onAuthChangeCallback;
-    onAuthChangeCallback = (user) => {
-      onAuthChangeCallback = originalCallback;
-      if (user) {
-        resolve(user);
-      } else {
-        reject(new Error('Sign-in cancelled'));
-      }
-    };
+    pendingAuthResolve = resolve;
+    pendingAuthReject = reject;
 
-    // Prompt user to sign in
-    window.google.accounts.id.prompt((notification: { isNotDisplayed: () => boolean; isSkippedMoment: () => boolean }) => {
-      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-        // Fallback: render button in a modal or use redirect
-        onAuthChangeCallback = originalCallback;
-        reject(new Error('Google Sign-In prompt not displayed. Try again or check popup blockers.'));
-      }
-    });
+    codeClient.requestCode();
   });
 }
 
-/**
- * Sign out user
- */
 export function signOut(): void {
   localStorage.removeItem(STORAGE_KEY);
   
@@ -197,10 +231,6 @@ export function signOut(): void {
   }
 }
 
-/**
- * Get stored user from localStorage
- * Returns null if not authenticated or token expired
- */
 export function getStoredUser(): GoogleUser | null {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -208,8 +238,7 @@ export function getStoredUser(): GoogleUser | null {
 
     const user: GoogleUser = JSON.parse(stored);
     
-    // Check if token is expired
-    if (isTokenExpired(user.idToken)) {
+    if (user.idToken && isTokenExpired(user.idToken)) {
       localStorage.removeItem(STORAGE_KEY);
       return null;
     }
@@ -221,16 +250,10 @@ export function getStoredUser(): GoogleUser | null {
   }
 }
 
-/**
- * Check if user is authenticated
- */
 export function isAuthenticated(): boolean {
   return getStoredUser() !== null;
 }
 
-/**
- * Subscribe to auth state changes
- */
 export function onAuthStateChange(callback: (user: GoogleUser | null) => void): () => void {
   onAuthChangeCallback = callback;
   return () => {
@@ -238,22 +261,15 @@ export function onAuthStateChange(callback: (user: GoogleUser | null) => void): 
   };
 }
 
-/**
- * Check if Google OAuth is configured
- */
 export function isOAuthConfigured(): boolean {
   return !!CLIENT_ID;
 }
 
-/**
- * Get the current ID token for API calls
- */
 export function getIdToken(): string | null {
   const user = getStoredUser();
   return user?.idToken || null;
 }
 
-// TypeScript declarations for Google Identity Services
 declare global {
   interface Window {
     google?: {
@@ -261,7 +277,7 @@ declare global {
         id: {
           initialize: (config: {
             client_id: string;
-            callback: (response: GoogleCredentialResponse) => void;
+            callback: (response: { credential: string }) => void;
             auto_select?: boolean;
             cancel_on_tap_outside?: boolean;
             use_fedcm_for_prompt?: boolean;
@@ -282,6 +298,10 @@ declare global {
           ) => void;
           disableAutoSelect: () => void;
           revoke: (email: string, callback: () => void) => void;
+        };
+        oauth2: {
+          initCodeClient: (config: CodeClientConfig) => { requestCode: () => void };
+          initTokenClient: (config: TokenClientConfig) => { requestAccessToken: () => void };
         };
       };
     };

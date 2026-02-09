@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { ReviewResponse, CategorizedComment, PerformanceIssue, JSSyntaxImprovement, BreakingChange, CodeDuplication, PRIssue } from "../types";
+import { ReviewResponse, CategorizedComment, PerformanceIssue, JSSyntaxImprovement, BreakingChange, CodeDuplication, PRIssue, ReactBestPracticesIssue, Severity } from "../types";
 import {
   getAvailableModelsForTask,
   ModelConfig
@@ -14,6 +14,19 @@ import {
 import { analyzeDiffForPerformance, generatePerformancePromptSection } from "./performanceAnalyzer";
 import { analyzeBreakingChangesFromDiff, generateBreakingChangeReport } from "./breakingChangeDetector";
 import { analyzeDiffForDuplication, generateDuplicationReport } from "./codeDuplicationDetector";
+import { 
+  analyzeDiffForReact, 
+  generateReactPromptSection,
+  type ReactAnalysisResult,
+  type ReactBestPracticesConfig 
+} from "./reactBestPractices";
+import {
+  analyzeDiffForTypeScript,
+  generateTypeScriptPromptSection,
+  type TypeScriptAnalysisResult,
+  type TypeScriptBestPracticesConfig,
+  type TypeScriptIssue,
+} from "./typescriptBestPractices";
 
 const CHUNK_CONFIG = {
   MAX_FILES_PER_CHUNK: 20,
@@ -352,6 +365,87 @@ async function callGoogleGenAI(options: RequestOptions): Promise<{ text: string 
   return { text: response.text || '' };
 }
 
+async function callAnthropicAPI(options: RequestOptions): Promise<{ text: string }> {
+  if (options.abortSignal?.aborted) {
+    throw new Error('Request cancelled');
+  }
+
+  const baseUrl = import.meta.env.VITE_OPENCODE_API_URL || 'http://34.60.22.68:8080';
+  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.VITE_OPENCODE_API_KEY || 'hoainho';
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+
+  if (options.abortSignal) {
+    options.abortSignal.addEventListener('abort', () => controller.abort());
+  }
+
+  let jsonInstructions = '';
+  if (options.responseMimeType === 'application/json') {
+    jsonInstructions = '\n\nIMPORTANT: You MUST respond with valid JSON only. No markdown code blocks, no explanation, just the raw JSON object.';
+    
+    if (options.responseSchema) {
+      const schemaStr = JSON.stringify(options.responseSchema, null, 2);
+      jsonInstructions += `\n\nYou MUST follow this exact JSON schema:\n${schemaStr}\n\nEnsure ALL required fields are present in each issue object.`;
+    }
+  }
+
+  const systemContent = options.systemInstruction + jsonInstructions;
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: options.model,
+        max_tokens: 16384,
+        system: systemContent,
+        messages: [{ role: 'user', content: options.contents }],
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      const errorMessage = error.error?.message || `HTTP ${response.status}`;
+      throw new Error(`Anthropic API error: ${errorMessage}`);
+    }
+
+    const data = await response.json();
+    let content = data.content?.[0]?.text || '';
+
+    if (options.responseMimeType === 'application/json' && content) {
+      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch) {
+        content = jsonMatch[1].trim();
+      } else {
+        const codeMatch = content.match(/```\s*([\s\S]*?)\s*```/);
+        if (codeMatch) {
+          content = codeMatch[1].trim();
+        }
+      }
+    }
+
+    return { text: content };
+  } catch (error) {
+    clearTimeout(timeoutId);
+
+    if (error instanceof Error && error.name === 'AbortError') {
+      if (options.abortSignal?.aborted) {
+        throw new Error('Request cancelled');
+      }
+      throw new Error('Request timeout after 10 minutes');
+    }
+    throw error;
+  }
+}
+
 async function callOpenAICompatible(options: RequestOptions): Promise<{ text: string }> {
   if (options.abortSignal?.aborted) {
     throw new Error('Request cancelled');
@@ -367,9 +461,15 @@ async function callOpenAICompatible(options: RequestOptions): Promise<{ text: st
     options.abortSignal.addEventListener('abort', () => controller.abort());
   }
 
-  const jsonInstructions = options.responseMimeType === 'application/json' 
-    ? '\n\nIMPORTANT: You MUST respond with valid JSON only. No markdown, no explanation, just the JSON object.'
-    : '';
+  let jsonInstructions = '';
+  if (options.responseMimeType === 'application/json') {
+    jsonInstructions = '\n\nIMPORTANT: You MUST respond with valid JSON only. No markdown, no explanation, just the JSON object.';
+    
+    if (options.responseSchema) {
+      const schemaStr = JSON.stringify(options.responseSchema, null, 2);
+      jsonInstructions += `\n\nYou MUST follow this exact JSON schema:\n${schemaStr}\n\nEnsure ALL required fields are present in each issue object.`;
+    }
+  }
 
   const systemContent = options.systemInstruction + jsonInstructions;
 
@@ -435,9 +535,15 @@ async function callOpenAICompatible(options: RequestOptions): Promise<{ text: st
 }
 
 function getProviderHandler(modelName: string): ProviderHandler {
-  const isGeminiModel = modelName.startsWith('gemini');
-  
-  if (isGeminiModel) {
+  if (modelName.startsWith('gemini-claude') || modelName.startsWith('claude')) {
+    console.log(`[Provider] ${modelName} → Anthropic API`);
+    return {
+      name: 'Anthropic',
+      makeRequest: callAnthropicAPI,
+    };
+  }
+
+  if (modelName.startsWith('gemini')) {
     console.log(`[Provider] ${modelName} → GoogleGenAI SDK`);
     return {
       name: 'GoogleGenAI',
@@ -569,6 +675,8 @@ export interface EnhancedReviewResponse extends ReviewResponse {
   syntaxImprovements?: JSSyntaxImprovement[];
   breakingChanges?: BreakingChange[];
   codeDuplications?: CodeDuplication[];
+  reactBestPractices?: ReactBestPracticesIssue[];
+  typescriptBestPractices?: TypeScriptIssue[];
 }
 
 export interface AnalysisProgress {
@@ -763,6 +871,10 @@ export const analyzeDiff = async (
     enablePerformanceAnalysis?: boolean;
     enableBreakingChangeDetection?: boolean;
     enableDuplicationDetection?: boolean;
+    enableReactBestPractices?: boolean;
+    enableTypeScriptBestPractices?: boolean;
+    reactConfig?: Partial<ReactBestPracticesConfig>;
+    typescriptConfig?: Partial<TypeScriptBestPracticesConfig>;
     onProgress?: ProgressCallback;
     shouldPause?: () => boolean;
     shouldCancel?: () => boolean;
@@ -773,6 +885,8 @@ export const analyzeDiff = async (
     enablePerformanceAnalysis: true,
     enableBreakingChangeDetection: true,
     enableDuplicationDetection: true,
+    enableReactBestPractices: true,
+    enableTypeScriptBestPractices: true,
     ...options,
   };
 
@@ -790,6 +904,8 @@ export const analyzeDiff = async (
   let syntaxImprovements: JSSyntaxImprovement[] = [];
   let breakingChanges: BreakingChange[] = [];
   let codeDuplications: CodeDuplication[] = [];
+  let reactAnalysis: ReactAnalysisResult | null = null;
+  let typescriptAnalysis: TypeScriptAnalysisResult | null = null;
 
   if (opts.enableJS2026 || opts.enablePerformanceAnalysis) {
     console.log('[Analysis] Running performance & JS2026 analyzer...');
@@ -809,6 +925,18 @@ export const analyzeDiff = async (
     console.log('[Analysis] Running code duplication detector...');
     codeDuplications = analyzeDiffForDuplication(diff);
     console.log(`[Analysis] Found ${codeDuplications.length} code duplication patterns`);
+  }
+
+  if (opts.enableReactBestPractices) {
+    console.log('[Analysis] Running React best practices analyzer...');
+    reactAnalysis = await analyzeDiffForReact(diff, opts.reactConfig);
+    console.log(`[Analysis] Found ${reactAnalysis.staticDetections.length} potential React issues, ${reactAnalysis.verifiedIssues.length} verified`);
+  }
+
+  if (opts.enableTypeScriptBestPractices) {
+    console.log('[Analysis] Running TypeScript best practices analyzer...');
+    typescriptAnalysis = await analyzeDiffForTypeScript(diff, opts.typescriptConfig);
+    console.log(`[Analysis] Found ${typescriptAnalysis.staticDetections.length} potential TypeScript issues, ${typescriptAnalysis.verifiedIssues.length} verified`);
   }
 
   const githubContextPrompt = githubContext
@@ -840,8 +968,26 @@ export const analyzeDiff = async (
 
   let aiIssues: PRIssue[] = [];
 
+  const reactBestPractices: ReactBestPracticesIssue[] = reactAnalysis?.verifiedIssues.map(issue => ({
+    id: issue.id,
+    ruleId: issue.ruleId,
+    ruleName: issue.ruleName,
+    category: issue.category,
+    severity: (issue.severity === 'CRITICAL' ? Severity.HIGH : issue.severity === 'HIGH' ? Severity.HIGH : issue.severity === 'MEDIUM' ? Severity.MEDIUM : Severity.LOW),
+    fileName: issue.fileName,
+    lineNumbers: issue.lineNumbers,
+    snippet: issue.snippet,
+    description: issue.description,
+    impact: issue.impact,
+    suggestedFix: issue.suggestedFix,
+    suggestedCode: issue.suggestedCode,
+    confidence: issue.confidence,
+    aiVerified: issue.aiVerified,
+    references: issue.references,
+  })) || [];
+
   if (checkCancel()) {
-    return { issues: [], performanceIssues, syntaxImprovements, breakingChanges, codeDuplications };
+    return { issues: [], performanceIssues, syntaxImprovements, breakingChanges, codeDuplications, reactBestPractices, typescriptBestPractices: typescriptAnalysis?.verifiedIssues || [] };
   }
 
   if (needsChunking(diff)) {
@@ -867,7 +1013,7 @@ export const analyzeDiff = async (
     console.log('[Analysis] Standard PR - using single analysis');
     
     if (checkCancel()) {
-      return { issues: [], performanceIssues, syntaxImprovements, breakingChanges, codeDuplications };
+      return { issues: [], performanceIssues, syntaxImprovements, breakingChanges, codeDuplications, reactBestPractices, typescriptBestPractices: typescriptAnalysis?.verifiedIssues || [] };
     }
     
     const diffLines = diff.split('\n').length;
@@ -877,6 +1023,8 @@ export const analyzeDiff = async (
     const performanceSection = generatePerformancePromptSection(performanceIssues, syntaxImprovements);
     const breakingChangeSection = generateBreakingChangeReport(breakingChanges);
     const duplicationSection = generateDuplicationReport(codeDuplications);
+    const reactSection = reactAnalysis ? generateReactPromptSection(reactAnalysis) : '';
+    const typescriptSection = typescriptAnalysis ? generateTypeScriptPromptSection(typescriptAnalysis.staticDetections) : '';
     
     try {
       const result = await executeWithRetry(
@@ -886,7 +1034,7 @@ export const analyzeDiff = async (
           const handler = getProviderHandler(model.sdkModelName);
           const analysisPrompt = buildAnalysisPrompt(isLargePR, fileCount, githubContextPrompt, prdContextPrompt);
           
-          const enhancedPrompt = `${analysisPrompt}\n${performanceSection}\n${breakingChangeSection}\n${duplicationSection}`;
+          const enhancedPrompt = `${analysisPrompt}\n${performanceSection}\n${breakingChangeSection}\n${duplicationSection}\n${reactSection}\n${typescriptSection}`;
 
           const response = await handler.makeRequest({
             model: model.sdkModelName,
@@ -943,7 +1091,7 @@ export const analyzeDiff = async (
     } catch (error) {
       if (error instanceof Error && error.message === 'Request cancelled') {
         console.log('[Analysis] Cancelled by user');
-        return { issues: [], performanceIssues, syntaxImprovements, breakingChanges, codeDuplications };
+        return { issues: [], performanceIssues, syntaxImprovements, breakingChanges, codeDuplications, reactBestPractices, typescriptBestPractices: typescriptAnalysis?.verifiedIssues || [] };
       }
       throw error;
     }
@@ -962,8 +1110,10 @@ export const analyzeDiff = async (
     issues: aiIssues,
     performanceIssues,
     syntaxImprovements,
+    reactBestPractices,
     breakingChanges,
     codeDuplications,
+    typescriptBestPractices: typescriptAnalysis?.verifiedIssues || [],
   };
 };
 

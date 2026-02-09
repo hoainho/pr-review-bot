@@ -11,10 +11,101 @@ export interface ModelConfig {
   contextWindow?: number;
   maxOutputTokens?: number;
   priority?: number;
-  quotaType?: 'antigravity' | 'gemini-cli' | 'opencode' | 'gitlab' | 'combined';
+  quotaType?: 'antigravity' | 'gemini-cli' | 'opencode' | 'gitlab' | 'anthropic' | 'combined';
 }
 
 export const MODEL_ROTATION_ORDER: ModelConfig[] = [
+  // === CLAUDE (Priority 1-3) ===
+  {
+    name: 'claude-opus-4-5-thinking',
+    displayName: 'Claude Opus 4.5 Thinking',
+    sdkModelName: 'gemini-claude-opus-4-5-thinking',
+    provider: 'anthropic',
+    capabilities: ['analyze', 'categorize', 'general'],
+    contextWindow: 200000,
+    maxOutputTokens: 16384,
+    priority: 1,
+    quotaType: 'anthropic'
+  },
+  {
+    name: 'claude-sonnet-4-5',
+    displayName: 'Claude Sonnet 4.5',
+    sdkModelName: 'gemini-claude-sonnet-4-5',
+    provider: 'anthropic',
+    capabilities: ['analyze', 'categorize', 'general'],
+    contextWindow: 200000,
+    maxOutputTokens: 16384,
+    priority: 2,
+    quotaType: 'anthropic'
+  },
+  {
+    name: 'claude-sonnet-4-5-thinking',
+    displayName: 'Claude Sonnet 4.5 Thinking',
+    sdkModelName: 'gemini-claude-sonnet-4-5-thinking',
+    provider: 'anthropic',
+    capabilities: ['analyze', 'categorize', 'general'],
+    contextWindow: 200000,
+    maxOutputTokens: 16384,
+    priority: 3,
+    quotaType: 'anthropic'
+  },
+  // === GPT (Priority 4-8) ===
+  {
+    name: 'gpt-5.2-codex',
+    displayName: 'GPT-5.2 Codex',
+    sdkModelName: 'gpt-5.2-codex',
+    provider: 'openai',
+    capabilities: ['analyze', 'categorize', 'general'],
+    contextWindow: 128000,
+    maxOutputTokens: 16384,
+    priority: 4,
+    quotaType: 'opencode'
+  },
+  {
+    name: 'gpt-5.1-codex-max',
+    displayName: 'GPT-5.1 Codex Max',
+    sdkModelName: 'gpt-5.1-codex-max',
+    provider: 'openai',
+    capabilities: ['analyze', 'categorize', 'general'],
+    contextWindow: 128000,
+    maxOutputTokens: 16384,
+    priority: 5,
+    quotaType: 'opencode'
+  },
+  {
+    name: 'gpt-5.2',
+    displayName: 'GPT-5.2',
+    sdkModelName: 'gpt-5.2',
+    provider: 'openai',
+    capabilities: ['analyze', 'categorize', 'general'],
+    contextWindow: 128000,
+    maxOutputTokens: 16384,
+    priority: 6,
+    quotaType: 'opencode'
+  },
+  {
+    name: 'gpt-5.1-codex',
+    displayName: 'GPT-5.1 Codex',
+    sdkModelName: 'gpt-5.1-codex',
+    provider: 'openai',
+    capabilities: ['analyze', 'categorize', 'general'],
+    contextWindow: 128000,
+    maxOutputTokens: 16384,
+    priority: 7,
+    quotaType: 'opencode'
+  },
+  {
+    name: 'gpt-5.1',
+    displayName: 'GPT-5.1',
+    sdkModelName: 'gpt-5.1',
+    provider: 'openai',
+    capabilities: ['analyze', 'categorize', 'general'],
+    contextWindow: 128000,
+    maxOutputTokens: 16384,
+    priority: 8,
+    quotaType: 'opencode'
+  },
+  // === GEMINI (Priority 9-13) ===
   {
     name: 'gemini-3-pro-preview',
     displayName: 'Gemini 3 Pro',
@@ -23,7 +114,7 @@ export const MODEL_ROTATION_ORDER: ModelConfig[] = [
     capabilities: ['analyze', 'categorize', 'general'],
     contextWindow: 1048576,
     maxOutputTokens: 65536,
-    priority: 1,
+    priority: 9,
     quotaType: 'antigravity'
   },
   {
@@ -34,7 +125,7 @@ export const MODEL_ROTATION_ORDER: ModelConfig[] = [
     capabilities: ['analyze', 'categorize', 'general'],
     contextWindow: 1048576,
     maxOutputTokens: 65536,
-    priority: 2,
+    priority: 10,
     quotaType: 'gemini-cli'
   },
   {
@@ -45,7 +136,7 @@ export const MODEL_ROTATION_ORDER: ModelConfig[] = [
     capabilities: ['analyze', 'categorize', 'general'],
     contextWindow: 1048576,
     maxOutputTokens: 65536,
-    priority: 3,
+    priority: 11,
     quotaType: 'antigravity'
   },
   {
@@ -56,19 +147,8 @@ export const MODEL_ROTATION_ORDER: ModelConfig[] = [
     capabilities: ['analyze', 'categorize', 'general'],
     contextWindow: 1048576,
     maxOutputTokens: 65536,
-    priority: 4,
+    priority: 12,
     quotaType: 'antigravity'
-  },
-  {
-    name: 'llama-3.3-70b-versatile',
-    displayName: 'Llama 3.3 70B',
-    sdkModelName: 'llama-3.3-70b-versatile',
-    provider: 'openai',
-    capabilities: ['analyze', 'categorize', 'general'],
-    contextWindow: 128000,
-    maxOutputTokens: 8192,
-    priority: 5,
-    quotaType: 'opencode'
   },
   {
     name: 'gemini-2.5-flash-lite',
@@ -78,8 +158,20 @@ export const MODEL_ROTATION_ORDER: ModelConfig[] = [
     capabilities: ['analyze', 'categorize', 'general'],
     contextWindow: 1048576,
     maxOutputTokens: 65536,
-    priority: 6,
+    priority: 13,
     quotaType: 'antigravity'
+  },
+  // === OPEN SOURCE FALLBACK (Priority 14-16) ===
+  {
+    name: 'llama-3.3-70b-versatile',
+    displayName: 'Llama 3.3 70B',
+    sdkModelName: 'llama-3.3-70b-versatile',
+    provider: 'openai',
+    capabilities: ['analyze', 'categorize', 'general'],
+    contextWindow: 128000,
+    maxOutputTokens: 8192,
+    priority: 14,
+    quotaType: 'opencode'
   },
   {
     name: 'qwen3-32b',
@@ -89,7 +181,7 @@ export const MODEL_ROTATION_ORDER: ModelConfig[] = [
     capabilities: ['analyze', 'categorize', 'general'],
     contextWindow: 128000,
     maxOutputTokens: 8192,
-    priority: 7,
+    priority: 15,
     quotaType: 'opencode'
   },
   {
@@ -100,7 +192,7 @@ export const MODEL_ROTATION_ORDER: ModelConfig[] = [
     capabilities: ['analyze', 'categorize', 'general'],
     contextWindow: 128000,
     maxOutputTokens: 8192,
-    priority: 8,
+    priority: 16,
     quotaType: 'opencode'
   },
 ];
@@ -225,7 +317,7 @@ export function getFallbackModelForTask(
 }
 
 export function getAllQuotaTypes(): string[] {
-  return ['antigravity', 'gemini-cli', 'opencode', 'combined'];
+  return ['anthropic', 'antigravity', 'gemini-cli', 'opencode', 'gitlab', 'combined'];
 }
 
 export function getModelsByQuotaType(quotaType: string): ModelConfig[] {

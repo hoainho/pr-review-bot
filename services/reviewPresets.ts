@@ -21,6 +21,12 @@ export const DEFAULT_RULES: ReviewRule[] = [
   { id: 'bp-error-handling', name: 'Error Handling', category: 'best_practices', enabled: true, severity: 'MEDIUM' as Severity },
   { id: 'bp-type-safety', name: 'Type Safety', category: 'best_practices', enabled: true, severity: 'MEDIUM' as Severity },
   { id: 'bp-async-patterns', name: 'Async/Await Patterns', category: 'best_practices', enabled: true, severity: 'LOW' as Severity },
+  { id: 'react-waterfalls', name: 'Request Waterfalls', category: 'performance', enabled: true, severity: 'CRITICAL' as Severity },
+  { id: 'react-barrel-imports', name: 'Barrel File Imports', category: 'performance', enabled: true, severity: 'HIGH' as Severity },
+  { id: 'react-server-actions', name: 'Server Action Security', category: 'security', enabled: true, severity: 'CRITICAL' as Severity },
+  { id: 'react-rerenders', name: 'React Re-render Issues', category: 'performance', enabled: true, severity: 'MEDIUM' as Severity },
+  { id: 'react-suspense', name: 'Missing Suspense Boundaries', category: 'best_practices', enabled: true, severity: 'MEDIUM' as Severity },
+  { id: 'react-bundle-size', name: 'Bundle Size Optimization', category: 'performance', enabled: true, severity: 'HIGH' as Severity },
 ];
 
 export const BUILTIN_PRESETS: ReviewPreset[] = [
@@ -90,6 +96,24 @@ export const BUILTIN_PRESETS: ReviewPreset[] = [
     })),
     enabled_checks: ['PERFORMANCE', 'MEMORY_LEAK', 'RESOURCE_LEAK', 'JS_SYNTAX_OPTIMIZATION'] as BugType[],
     severity_threshold: 'LOW' as Severity,
+    js2026_enabled: true,
+    performance_analysis: true,
+  },
+  {
+    id: 'preset-react-nextjs',
+    name: 'React/Next.js Optimized',
+    type: 'CUSTOM' as ReviewPresetType,
+    description: 'Specialized for React and Next.js - Vercel best practices for performance and patterns',
+    rules: DEFAULT_RULES.map(r => ({
+      ...r,
+      enabled: r.id.startsWith('react-') || r.category === 'performance' || r.category === 'security',
+      severity: r.id.startsWith('react-') ? 'HIGH' as Severity : r.severity
+    })),
+    enabled_checks: [
+      'REACT_WATERFALL', 'REACT_BUNDLE_SIZE', 'REACT_SERVER_PERF', 
+      'REACT_CLIENT_PERF', 'REACT_RERENDER', 'PERFORMANCE', 'SECURITY'
+    ] as BugType[],
+    severity_threshold: 'MEDIUM' as Severity,
     js2026_enabled: true,
     performance_analysis: true,
   },
