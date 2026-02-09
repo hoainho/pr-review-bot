@@ -43,9 +43,7 @@ const STORAGE_KEY = 'gear_pr_review_google_user';
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 const PROXY_URL = import.meta.env.VITE_PROXY_URL || 'https://proxy.hoainho.info';
 
-const GEMINI_SCOPE = 'https://www.googleapis.com/auth/generative-language.retriever';
 const BASE_SCOPES = 'openid email profile';
-const FULL_SCOPES = `${BASE_SCOPES} ${GEMINI_SCOPE}`;
 
 let googleInitialized = false;
 let codeClient: { requestCode: () => void } | null = null;
@@ -191,7 +189,7 @@ export async function initGoogleAuth(): Promise<void> {
 
   codeClient = window.google!.accounts.oauth2.initCodeClient({
     client_id: CLIENT_ID,
-    scope: FULL_SCOPES,
+    scope: BASE_SCOPES,
     ux_mode: 'popup',
     callback: handleCodeResponse,
     select_account: true,

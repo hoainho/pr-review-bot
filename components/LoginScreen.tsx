@@ -95,7 +95,7 @@ export function LoginScreen() {
         </div>
 
         <p className="text-xs text-slate-600 text-center mt-4">
-          Built by NhoNH • Powered by Google Gemini
+          Built with ❤️ by Hoài Nhớ
         </p>
       </div>
     </div>
