@@ -1,0 +1,50 @@
+title: "[Q&A] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🙏 Questions & Answers
+        
+        Need help with Gear PR Review? Ask away!
+        
+        **Tips for getting quick answers:**
+        - Search existing discussions first
+        - Be specific about your issue
+        - Include error messages or screenshots if applicable
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your Question
+      description: What do you need help with?
+      placeholder: "How do I..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Any relevant details (browser, error messages, what you've tried)
+      placeholder: |
+        - Browser: Chrome 120
+        - Error: ...
+        - I tried: ...
+    validations:
+      required: false
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: What area is this related to?
+      options:
+        - Setup / Configuration
+        - GitHub Integration
+        - AI Analysis
+        - Jira / Confluence
+        - React / TypeScript Analyzer
+        - Performance
+        - Other
+    validations:
+      required: true

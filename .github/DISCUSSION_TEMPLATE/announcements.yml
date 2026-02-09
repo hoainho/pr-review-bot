@@ -1,0 +1,20 @@
+title: "[Announcement] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 📣 Announcements
+        
+        This category is for official updates, releases, and news about Gear PR Review.
+        
+        **Only maintainers can post here.**
+
+  - type: textarea
+    id: announcement
+    attributes:
+      label: Announcement Details
+      description: Share the news with the community
+      placeholder: What's new?
+    validations:
+      required: true

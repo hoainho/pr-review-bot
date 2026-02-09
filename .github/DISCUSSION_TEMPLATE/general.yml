@@ -1,0 +1,18 @@
+title: ""
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 💬 General Discussion
+        
+        For everything else! Chat about code review, AI, development workflows, or just say hi.
+
+  - type: textarea
+    id: content
+    attributes:
+      label: What's on your mind?
+      description: Share your thoughts with the community
+      placeholder: "..."
+    validations:
+      required: true

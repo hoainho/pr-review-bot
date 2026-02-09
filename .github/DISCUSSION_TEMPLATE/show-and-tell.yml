@@ -1,0 +1,32 @@
+title: "[Show] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🙌 Show and Tell
+        
+        Share your experience with Gear PR Review! 
+        
+        - Tips and tricks you've discovered
+        - Interesting bugs caught by the AI
+        - Your workflow setup
+        - Integration ideas
+
+  - type: textarea
+    id: showcase
+    attributes:
+      label: What would you like to share?
+      description: Tell us about your experience!
+      placeholder: "I've been using Gear PR Review for... and found that..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / Examples
+      description: Add any visuals that help illustrate your point
+      placeholder: Drag and drop images here
+    validations:
+      required: false
