@@ -51,41 +51,35 @@ export function parseLinearIssueIds(text: string): string[] {
 
 /**
  * GraphQL query to fetch issue details by identifier
+ * Linear's `id` argument accepts either the UUID or the human-readable identifier (e.g., "TEAM-123")
  */
 const ISSUE_QUERY = `
   query IssueByIdentifier($identifier: String!) {
-    issueSearch(
-      filter: { 
-        identifier: { eq: $identifier }
+    issue(id: $identifier) {
+      id
+      identifier
+      title
+      description
+      url
+      priority
+      priorityLabel
+      estimate
+      createdAt
+      updatedAt
+      state {
+        name
+        type
       }
-      first: 1
-    ) {
-      nodes {
-        id
-        identifier
-        title
-        description
-        url
-        priority
-        priorityLabel
-        estimate
-        createdAt
-        updatedAt
-        state {
+      team {
+        name
+        key
+      }
+      project {
+        name
+      }
+      labels {
+        nodes {
           name
-          type
-        }
-        team {
-          name
-          key
-        }
-        project {
-          name
-        }
-        labels {
-          nodes {
-            name
-          }
         }
       }
     }
@@ -128,7 +122,7 @@ async function fetchLinearIssue(
       throw new Error(`Linear GraphQL error: ${errorMessage}`);
     }
 
-    const issue = data.data?.issueSearch?.nodes?.[0];
+    const issue = data.data?.issue;
     
     if (!issue) {
       console.log(`[Linear] Issue ${identifier} not found`);
