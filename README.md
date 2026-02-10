@@ -26,6 +26,7 @@ Gear PR Review is an intelligent code review tool that goes beyond simple diff a
 - **Deep Context Analysis** - Analyzes repository structure, component relationships, and coding patterns
 - **Progressive Learning** - Learns security patterns, naming conventions, and architectural rules from your codebase
 - **Jira/Confluence Integration** - Cross-references PRD/TDD requirements to identify specification gaps
+- **Linear Integration** - Fetches Linear issue context for enhanced AI analysis
 - **Large PR Support** - Handles PRs with 300+ files through intelligent pagination
 - **Professional GitHub Integration** - Posts human-readable review comments directly to PRs
 
@@ -112,7 +113,37 @@ Cross-references your PR against project requirements:
 - Shows requirement tooltips on hover
 - Links directly to source documentation
 
-### 4. Large PR Handling
+### 4. Linear Integration
+
+Connects with Linear.app for issue tracking context:
+
+- **Auto-detection** - Finds Linear issue IDs (e.g., `TEAM-123`) in PR title and diff
+- **Rich Context** - Fetches title, description, status, priority, labels, team, and project
+- **AI Enhancement** - Provides issue context to AI for more relevant code reviews
+- **Works Alongside Jira** - Can be used together with Jira/Confluence integration
+
+#### How to Use Linear Integration
+
+1. **Get your Linear API Key**:
+   - Go to [Linear Settings → API](https://linear.app/settings/api)
+   - Create a new API key with read access
+   - Copy the key (starts with `lin_api_`)
+
+2. **Configure in Gear PR Review**:
+   - Enable "Linear Integration" checkbox
+   - Paste your API key
+
+3. **Reference Issues in PRs**:
+   - Include Linear issue IDs in your PR title or description
+   - Format: `TEAM-123` (uppercase letters, dash, numbers)
+   - Example: `[ENG-456] Fix authentication timeout`
+
+4. **AI Analysis**:
+   - The tool auto-detects issue IDs from PR content
+   - Fetches issue details from Linear API
+   - Includes context in AI prompts for better reviews
+
+### 5. Large PR Handling
 
 For PRs exceeding GitHub's 300-file diff limit:
 
@@ -121,7 +152,7 @@ For PRs exceeding GitHub's 300-file diff limit:
 - Progress tracking during fetch
 - Unified diff construction from patches
 
-### 5. Professional GitHub Comments
+### 6. Professional GitHub Comments
 
 Human-readable review format (no emojis, enterprise-friendly):
 
@@ -233,6 +264,9 @@ Fetch PR Diff
     ├─→ Linked Tickets
     └─→ PRD/TDD Documents
     ↓
+[Optional] Fetch Linear Context
+    └─→ Issue details (title, description, status, priority)
+    ↓
 Learning Phase (patterns, rules)
     ↓
 Analyze with Gemini AI
@@ -246,7 +280,7 @@ Post to GitHub / Display Results
 
 ## Testing
 
-The project includes a comprehensive test suite with 60 tests:
+The project includes a comprehensive test suite with 209 tests:
 
 ```bash
 # Run all tests
@@ -263,6 +297,9 @@ npm run test:coverage
 
 | Category | Tests | Coverage |
 |----------|-------|----------|
+| Model Rotation | 77 | Model selection, fallback logic, error handling |
+| AI Service | 36 | Diff analysis, chunking, context formatting |
+| Linear Service | 36 | Issue parsing, API integration, formatting |
 | GitHub Service | 18 | URL parsing, diff fetching, large PR handling |
 | Comment Formatting | 17 | Template C format, severity labels, signatures |
 | Types Validation | 9 | Interface contracts, enum values |
@@ -285,10 +322,11 @@ npm run test
 ```
 gear-pr-review/
 ├── services/
-│   ├── geminiService.ts      # AI analysis engine
+│   ├── aiService.ts          # AI analysis engine
 │   ├── githubService.ts      # GitHub API + comment formatting
 │   ├── githubMCPContext.ts   # Repository context fetching
-│   └── jiraConfluenceMCP.ts  # Jira/Confluence integration
+│   ├── jiraConfluenceMCP.ts  # Jira/Confluence integration
+│   └── linearService.ts      # Linear.app integration
 ├── components/
 │   └── RequirementTooltip.tsx # PRD/TDD hover tooltip
 ├── types.ts                   # TypeScript interfaces
@@ -333,6 +371,7 @@ PRs with 300+ files use paginated fetching with rate limiting. Progress is shown
 
 ### Planned Improvements
 
+- [x] **Linear Integration** - Linear.app issue tracking *(v1.0.1)*
 - [ ] **CodeQL Integration** - GitHub security analysis
 - [ ] **Incremental Updates** - Only re-fetch changed files
 - [ ] **Custom Rule Engine** - User-defined review patterns
