@@ -11,6 +11,11 @@ import {
   JiraConfluenceContext,
   JiraFetchResult
 } from "./jiraConfluenceMCP";
+import {
+  fetchLinearContext,
+  formatLinearContextForPrompt,
+  LinearContext,
+} from "./linearService";
 import { analyzeDiffForPerformance, generatePerformancePromptSection } from "./performanceAnalyzer";
 import { analyzeBreakingChangesFromDiff, generateBreakingChangeReport } from "./breakingChangeDetector";
 import { analyzeDiffForDuplication, generateDuplicationReport } from "./codeDuplicationDetector";
@@ -866,6 +871,7 @@ export const analyzeDiff = async (
   jiraContext?: JiraConfluenceContext,
   prTitle?: string,
   prDescription?: string,
+  linearContext?: LinearContext,
   options?: {
     enableJS2026?: boolean;
     enablePerformanceAnalysis?: boolean;
@@ -944,6 +950,7 @@ export const analyzeDiff = async (
     : 'No repository context.';
 
   let prdContextPrompt = 'No PRD context.';
+  const contextParts: string[] = [];
   
   if (jiraContext) {
     const jiraResult = await fetchAutoDiscoveredContext(jiraContext, diff, prTitle || diff);
@@ -957,13 +964,36 @@ export const analyzeDiff = async (
     }
     
     if (jiraResult.context && (jiraResult.context.tickets.length > 0 || jiraResult.context.documentation.length > 0)) {
-      prdContextPrompt = await formatPRDContextForPrompt(jiraResult.context);
+      const jiraContextPrompt = await formatPRDContextForPrompt(jiraResult.context);
+      contextParts.push(jiraContextPrompt);
       console.log(`[Jira] Context loaded: ${jiraResult.context.tickets.length} tickets, ${jiraResult.context.documentation.length} docs`);
-    } else {
-      prdContextPrompt = jiraResult.errors.length > 0 
-        ? `Jira integration enabled but encountered errors: ${jiraResult.errors.join('; ')}`
-        : 'No Jira ticket keys found in PR (format: PROJECT-123).';
+    } else if (jiraResult.errors.length > 0) {
+      contextParts.push(`Jira integration enabled but encountered errors: ${jiraResult.errors.join('; ')}`);
     }
+  }
+
+  if (linearContext) {
+    const linearResult = await fetchLinearContext(linearContext, diff, prTitle || diff);
+    
+    if (linearResult.errors.length > 0) {
+      console.warn('[Linear] Errors during fetch:', linearResult.errors);
+    }
+    
+    if (linearResult.issueIdsFound.length > 0) {
+      console.log(`[Linear] Found ${linearResult.issueIdsFound.length} issue IDs: ${linearResult.issueIdsFound.join(', ')}`);
+    }
+    
+    if (linearResult.issues.length > 0) {
+      const linearContextPrompt = formatLinearContextForPrompt(linearResult);
+      contextParts.push(linearContextPrompt);
+      console.log(`[Linear] Context loaded: ${linearResult.issues.length} issues`);
+    } else if (linearResult.errors.length > 0) {
+      contextParts.push(`Linear integration enabled but encountered errors: ${linearResult.errors.join('; ')}`);
+    }
+  }
+
+  if (contextParts.length > 0) {
+    prdContextPrompt = contextParts.join('\n');
   }
 
   let aiIssues: PRIssue[] = [];

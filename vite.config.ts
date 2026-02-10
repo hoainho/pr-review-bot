@@ -132,6 +132,18 @@ export default defineConfig({
           }
           return path;
         }
+      },
+      '/api/linear': {
+        target: 'https://api.linear.app',
+        changeOrigin: true,
+        secure: true,
+        rewrite: () => '/graphql',
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Host', 'api.linear.app');
+            proxyReq.setHeader('Origin', 'https://api.linear.app');
+          });
+        },
       }
     }
   },
