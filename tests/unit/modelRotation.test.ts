@@ -39,27 +39,26 @@ describe('Model Rotation Service', () => {
       expect(priorities[2]).toBe(3);
     });
 
-    it('should have Claude models with gemini-claude prefix for proxy compatibility', () => {
-      const claudeModels = MODEL_ROTATION_ORDER.filter(m => m.provider === 'anthropic');
-      claudeModels.forEach(model => {
+    it('should have Claude Sonnet models with gemini-claude prefix for proxy compatibility', () => {
+      const claudeSonnetModels = MODEL_ROTATION_ORDER.filter(m => m.provider === 'anthropic' && m.name.includes('sonnet'));
+      claudeSonnetModels.forEach(model => {
         expect(model.sdkModelName.startsWith('gemini-claude')).toBe(true);
       });
     });
 
-    it('should have GPT models after Claude (priority 4-8)', () => {
-      const gptModels = MODEL_ROTATION_ORDER.filter(m => m.sdkModelName.startsWith('gpt-'));
-      expect(gptModels.length).toBeGreaterThanOrEqual(3);
+    it('should have Gemini models after Claude (priority 4+)', () => {
+      const geminiModels = MODEL_ROTATION_ORDER.filter(m => m.provider === 'gemini');
+      expect(geminiModels.length).toBeGreaterThanOrEqual(4);
       
-      gptModels.forEach(model => {
+      geminiModels.forEach(model => {
         expect(model.priority).toBeGreaterThanOrEqual(4);
-        expect(model.priority).toBeLessThanOrEqual(8);
       });
     });
 
-    it('should have Gemini models after GPT (priority 9+)', () => {
-      const geminiModels = MODEL_ROTATION_ORDER.filter(m => m.provider === 'gemini');
-      geminiModels.forEach(model => {
-        expect(model.priority).toBeGreaterThanOrEqual(9);
+    it('should have other models at lower priority', () => {
+      const otherModels = MODEL_ROTATION_ORDER.filter(m => m.provider === 'openai');
+      otherModels.forEach(model => {
+        expect(model.priority).toBeGreaterThanOrEqual(8);
       });
     });
 
@@ -135,9 +134,9 @@ describe('Model Rotation Service', () => {
       expect(openaiModels.length).toBeGreaterThan(0);
     });
 
-    it('should have Claude sdkModelName starting with "gemini-claude" for proxy', () => {
-      const anthropicModels = MODEL_ROTATION_ORDER.filter(m => m.provider === 'anthropic');
-      anthropicModels.forEach(model => {
+    it('should have Claude Sonnet sdkModelName starting with "gemini-claude" for proxy', () => {
+      const sonnetModels = MODEL_ROTATION_ORDER.filter(m => m.provider === 'anthropic' && m.name.includes('sonnet'));
+      sonnetModels.forEach(model => {
         expect(model.sdkModelName.startsWith('gemini-claude')).toBe(true);
       });
     });
@@ -162,7 +161,7 @@ describe('Model Rotation Service', () => {
 
     it('should return Claude Opus Thinking as first model for analyze task', () => {
       const models = getAvailableModelsForTask('analyze');
-      expect(models[0].name).toBe('claude-opus-4-5-thinking');
+      expect(models[0].name).toBe('claude-opus-4-6-thinking');
     });
   });
 
@@ -334,7 +333,7 @@ describe('Model Rotation Service', () => {
     it('should return first available model', () => {
       const model = getAnyAvailableModel('analyze');
       expect(model).not.toBeNull();
-      expect(model?.name).toBe('claude-opus-4-5-thinking');
+      expect(model?.name).toBe('claude-opus-4-6-thinking');
     });
 
     it('should clear quota and return model when all exhausted', () => {
@@ -346,7 +345,7 @@ describe('Model Rotation Service', () => {
 
   describe('getSdkModelName', () => {
     it('should return correct SDK model name', () => {
-      expect(getSdkModelName('claude-opus-4-5-thinking')).toBe('gemini-claude-opus-4-5-thinking');
+      expect(getSdkModelName('claude-opus-4-6-thinking')).toBe('claude-opus-4-6-thinking');
       expect(getSdkModelName('gemini-3-pro-preview')).toBe('gemini-3-pro-preview');
     });
 
@@ -371,10 +370,9 @@ describe('Model Rotation Service', () => {
       expect(models.length).toBeGreaterThan(0);
     });
 
-    it('all models should support all three tasks', () => {
+    it('most models should support analyze and general tasks', () => {
       MODEL_ROTATION_ORDER.forEach(model => {
         expect(model.capabilities).toContain('analyze');
-        expect(model.capabilities).toContain('categorize');
         expect(model.capabilities).toContain('general');
       });
     });
@@ -396,13 +394,12 @@ describe('Model Configuration Contracts', () => {
     });
   });
 
-  it('should maintain backward compatibility - all existing model names preserved', () => {
+  it('should have required Gemini models', () => {
     const requiredModels = [
       'gemini-3-pro-preview',
-      'gemini-2.5-pro',
       'gemini-3-flash-preview',
       'gemini-2.5-flash',
-      'llama-3.3-70b-versatile',
+      'gemini-2.5-flash-lite',
     ];
     
     requiredModels.forEach(name => {
@@ -411,10 +408,10 @@ describe('Model Configuration Contracts', () => {
     });
   });
 
-  it('should have Claude Opus 4.5 Thinking with correct SDK model name', () => {
-    const opus = MODEL_ROTATION_ORDER.find(m => m.name === 'claude-opus-4-5-thinking');
+  it('should have Claude Opus 4.6 Thinking with correct SDK model name', () => {
+    const opus = MODEL_ROTATION_ORDER.find(m => m.name === 'claude-opus-4-6-thinking');
     expect(opus).toBeDefined();
-    expect(opus?.sdkModelName).toBe('gemini-claude-opus-4-5-thinking');
+    expect(opus?.sdkModelName).toBe('claude-opus-4-6-thinking');
   });
 
   it('should have Claude Sonnet 4.5 with correct SDK model name', () => {
