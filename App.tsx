@@ -13,6 +13,7 @@ import { SupportPage } from './components/SupportPage';
 import { useAuth } from './contexts/AuthContext';
 import type { GitHubMCPContext } from './services/githubMCPContext';
 import type { JiraConfluenceContext } from './services/jiraConfluenceMCP';
+import type { LinearContext } from './services/linearService';
 import { initTheme, toggleTheme, getThemeConfig } from './services/darkMode';
 import { exportReview, downloadExport } from './services/exportService';
 import { ProgressTracker, formatETA } from './services/progressTracker';
@@ -58,7 +59,8 @@ import {
   ChevronDown,
   ChevronUp,
   Activity,
-  LogOut
+  LogOut,
+  Layers
 } from 'lucide-react';
 
 const renderTextWithCode = (text: string): React.ReactNode => {
@@ -95,6 +97,9 @@ const App: React.FC = () => {
   const [confluenceBaseUrl, setConfluenceBaseUrl] = useState('');
   
   const [useJiraConfluenceContext, setUseJiraConfluenceContext] = useState(false);
+
+  const [linearApiKey, setLinearApiKey] = useState('');
+  const [useLinearContext, setUseLinearContext] = useState(false);
 
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [progress, setProgress] = useState<AnalysisProgress | null>(null);
@@ -327,6 +332,16 @@ const App: React.FC = () => {
         addLog('warning', `Jira enabled but missing config: URL=${!!jiraBaseUrl}, Email=${!!jiraEmail}, Token=${!!jiraToken}`);
       }
 
+      const linearContext: LinearContext | undefined = useLinearContext && linearApiKey
+        ? { apiKey: linearApiKey }
+        : undefined;
+
+      if (linearContext) {
+        addLog('info', `Linear integration enabled - searching for issue IDs in PR...`);
+      } else if (useLinearContext) {
+        addLog('warning', `Linear enabled but missing API key`);
+      }
+
       addLog('info', 'Checking for merge conflicts...');
       const conflictCheck = await checkMergeConflicts(githubUrl, githubToken);
       if (conflictCheck.hasConflicts) {
@@ -336,7 +351,7 @@ const App: React.FC = () => {
       }
 
       addLog('progress', 'Starting AI analysis...');
-      const data = await analyzeDiff(diff, githubContext, jiraContext, prTitle, prDescription, {
+      const data = await analyzeDiff(diff, githubContext, jiraContext, prTitle, prDescription, linearContext, {
         onProgress: (chunkInfo) => {
           if (chunkInfo.status === 'analyzing') {
             setCurrentReviewFile(chunkInfo.currentFiles[0]);
@@ -992,6 +1007,65 @@ const App: React.FC = () => {
                         <li>Fetches ticket details, status, and related tickets</li>
                         <li>Fetches content directly from Confluence page URLs you provide</li>
                         <li>Enhances AI analysis with project context and requirements</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Layers className="w-5 h-5 text-slate-900 dark:text-slate-100" />
+              <h2 className="text-sm font-black text-slate-700 dark:text-slate-200 uppercase tracking-tight">Linear Integration</h2>
+            </div>
+            <div className="flex items-center space-x-1 text-xs text-slate-400 dark:text-slate-500">
+               <Info className="w-3.5 h-3.5" />
+               <span>Enhance reviews with Linear issue context</span>
+            </div>
+          </div>
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useLinearContext}
+                  onChange={(e) => setUseLinearContext(e.target.checked)}
+                  className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 border-slate-300 dark:border-slate-600"
+                />
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-200">Enable Linear Context Analysis</span>
+              </label>
+            </div>
+            
+            {useLinearContext && (
+              <div className="space-y-6 animate-in fade-in duration-300">
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest pl-1">Linear API Key</label>
+                  <input
+                    type="password"
+                    value={linearApiKey}
+                    onChange={(e) => setLinearApiKey(e.target.value)}
+                    placeholder="lin_api_xxxxxxxxxxxx"
+                    className="block w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-slate-100 text-sm font-medium rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                  />
+                  <p className="text-xs text-slate-400 dark:text-slate-500 pl-1">
+                    Get your API key from <a href="https://linear.app/settings/api" target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:text-indigo-600 underline">Linear Settings → API</a>
+                  </p>
+                </div>
+                
+                <div className="p-4 rounded-xl bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800">
+                  <div className="flex items-start space-x-3">
+                    <Info className="w-4 h-4 text-violet-500 dark:text-violet-400 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-violet-700 dark:text-violet-300">
+                      <p className="font-black mb-1">How this works:</p>
+                      <ul className="space-y-1 list-disc list-inside">
+                        <li>Auto-detects Linear issue IDs from PR title/description (e.g., TEAM-123)</li>
+                        <li>Fetches issue details, status, priority, and labels</li>
+                        <li>Enhances AI analysis with issue context and requirements</li>
+                        <li>Works alongside Jira integration — use both if needed</li>
                       </ul>
                     </div>
                   </div>

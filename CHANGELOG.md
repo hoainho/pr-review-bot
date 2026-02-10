@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2025-02-10
+
+### Added
+
+- **Linear Integration**: Full support for Linear.app issue tracking
+  - Auto-detects Linear issue IDs (TEAM-123) from PR title and diff
+  - Fetches issue details via Linear GraphQL API (title, description, status, priority, labels)
+  - Provides issue context to AI for enhanced code reviews
+  - Works alongside existing Jira/Confluence integration
+  - New UI section for configuring Linear API key
+- Added `/api/linear` proxy configuration for CORS handling
+- Added comprehensive unit tests for Linear service (25+ test cases)
+
+### Changed
+
+- Updated `aiService.ts` to combine context from GitHub, Jira, and Linear
+- Enhanced AI prompts to include Linear issue context when available
+
 ## [1.0.0] - 2025-02-10
 
 ### Changed
